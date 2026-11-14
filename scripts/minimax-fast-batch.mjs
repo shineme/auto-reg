@@ -29,7 +29,7 @@ const panelCheckOnly = process.env.PANEL_CHECK_ONLY === "1";
 const signInPollSeconds = Number(process.env.SIGN_IN_POLL_SECONDS || 90);
 const captchaReadyAttempts = Number(process.env.CAPTCHA_READY_ATTEMPTS || 60);
 const captchaPrewarmUrl = process.env.CAPTCHA_PREWARM_URL || "https://account.minimax.io/unified-login";
-const captchaUnavailablePattern = /reCAPTCHA Enterprise did not become ready|reCAPTCHA Enterprise returned no ticket|CDP browser did not become ready|CDP version HTTP|ECONNRESET|socket connection was closed unexpectedly|The operation was aborted due to timeout|fetch failed/i;
+const captchaUnavailablePattern = /reCAPTCHA Enterprise did not become ready|reCAPTCHA Enterprise returned no ticket|CDP browser did not become ready|CDP version HTTP/i;
 const siteKey = process.env.MINIMAX_RECAPTCHA_SITE_KEY || "";
 const captchaAction = "send_code";
 const captchaPrewarmHost = "account.minimax.io";
@@ -891,7 +891,7 @@ async function main() {
       await writeSummary(results);
       emitAccountResult(result);
       if (captchaUnavailablePattern.test(result.error || "")) {
-        emitProgress("environment-unavailable", "reCAPTCHA 票据环境暂不可用，本轮已停止；请检查出口或代理", { current: task.index });
+        emitProgress("captcha-retry", "本轮 reCAPTCHA 票据环境异常，守护进程将自动恢复", { current: task.index });
         process.exitCode = 1;
         return;
       }

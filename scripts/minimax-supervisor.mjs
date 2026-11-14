@@ -14,7 +14,7 @@ const progressPath = path.join(batchRoot, "supervisor.progress.json");
 const ledgerPath = path.join(batchRoot, "resume-ledger.json");
 const summaryPath = path.join(root, "summary.json");
 const batchScript = path.resolve(process.env.MINIMAX_BATCH_SCRIPT || path.join(workspace, "scripts", "minimax-fast-batch.mjs"));
-const captchaUnavailablePattern = /reCAPTCHA Enterprise did not become ready|reCAPTCHA Enterprise returned no ticket|CDP browser did not become ready|CDP version HTTP|reCAPTCHA 票据环境暂不可用|ECONNRESET|socket connection was closed unexpectedly|The operation was aborted due to timeout|fetch failed/i;
+const captchaUnavailablePattern = /reCAPTCHA Enterprise did not become ready|reCAPTCHA Enterprise returned no ticket|CDP browser did not become ready|CDP version HTTP|reCAPTCHA 票据环境暂不可用/i;
 const retryDelayMs = Math.max(0, Number(process.env.MINIMAX_RETRY_DELAY_MS || 15000));
 const pid = process.pid;
 const startedAt = new Date().toISOString();
@@ -247,7 +247,6 @@ async function runChild(restartCount) {
     const child = spawn(process.execPath, [batchScript], { cwd: workspace, env, stdio: ["ignore", "pipe", "pipe"] });
     let stdoutTail = "";
     let stderrTail = "";
-    let captchaUnavailableDetected = false;
     const forward = (isError) => (chunk) => {
       const text = chunk.toString("utf8");
       let buffer = (isError ? stderrTail : stdoutTail) + text;
@@ -262,13 +261,8 @@ async function runChild(restartCount) {
         if (isError) process.stderr.write(`${redactText(trimmed)}\n`);
       }
     };
-    const forwardChunk = (isError) => (chunk) => {
-      const text = chunk.toString("utf8");
-      if (captchaUnavailablePattern.test(text)) captchaUnavailableDetected = true;
-      forward(isError)(text);
-    };
-    child.stdout.on("data", forwardChunk(false));
-    child.stderr.on("data", forwardChunk(true));
+    child.stdout.on("data", forward(false));
+    child.stderr.on("data", forward(true));
     let settled = false;
     const finish = (value) => {
       if (settled) return;
@@ -280,14 +274,13 @@ async function runChild(restartCount) {
       const ledger = await prepareResumeBatch();
       if (ledger.succeeded >= targetSuccessCount) {
         child.kill("SIGTERM");
-        finish({ code: 0, error: "", targetReached: true, riskBlocked: false });
+        finish({ code: 0, error: "", targetReached: true });
       }
     }, 2000);
     child.on("close", (code) => {
       if (stdoutTail.trim()) printStructuredProgress(stdoutTail.trim(), restartCount);
       if (stderrTail.trim()) process.stderr.write(`${redactText(stderrTail.trim())}\n`);
-      if (captchaUnavailablePattern.test(stdoutTail) || captchaUnavailablePattern.test(stderrTail)) captchaUnavailableDetected = true;
-      finish({ code, error: "", captchaUnavailable: captchaUnavailableDetected });
+      finish({ code, error: "" });
     });
   });
 }
@@ -305,27 +298,6 @@ async function currentSummary() {
   const failed = Number(summary.failed ?? 0);
   const attempts = Number(summary.attempts ?? summary.completed ?? 0);
   return { succeeded, failed, attempts, finishedAt: summary.finishedAt || null };
-}
-
-async function publishStopped(summary, lastExitCode, restartCount) {
-  const fields = {
-    phase: "environment-unavailable",
-    running: false,
-    succeeded: summary.succeeded,
-    failed: summary.failed,
-    restartCount,
-    lastExitCode,
-    message: `reCAPTCHA 票据环境暂不可用，任务已停止；已保留 ${summary.succeeded} 个成功账号，请检查出口或代理`,
-  };
-  await publishStatus(fields);
-  await publishProgress(progressEvent({
-    ...fields,
-    done: summary.succeeded,
-    ok: summary.succeeded,
-    failed: summary.failed,
-    attempts: summary.attempts,
-    current: 0,
-  }));
 }
 
 async function publishStatus(fields) {
@@ -389,14 +361,13 @@ async function main() {
       const child = await runChild(restartCount);
       prepared = await prepareResumeBatch();
       const after = await currentSummary();
-      if (child.captchaUnavailable || (child.code === 0 && !child.targetReached && !after.finishedAt && prepared.succeeded < targetSuccessCount)) {
-        await publishStopped(after, child.code, restartCount);
-        return;
-      }
       if (prepared.succeeded >= targetSuccessCount || after.finishedAt) {
         await publishStatus({ phase: "done", running: false, succeeded: after.succeeded, failed: after.failed, restartCount, message: `已完成 ${after.succeeded}/${targetSuccessCount} 个成功账号` });
         await publishProgress(progressEvent({ phase: "done", done: after.succeeded, ok: after.succeeded, failed: after.failed, attempts: after.attempts, restartCount, message: `已完成 ${after.succeeded}/${targetSuccessCount} 个成功账号` }));
         return;
+      }
+      if (child.code === 0 && !child.targetReached) {
+        child.code = 1;
       }
       restartCount += 1;
       const delaySeconds = Math.ceil(retryDelayMs / 1000);

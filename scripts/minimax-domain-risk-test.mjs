@@ -58,7 +58,10 @@ const count = Number(await fs.readFile(counterPath, "utf8").catch(() => "0")) + 
 await fs.writeFile(counterPath, String(count));
 console.error("send-code: 1200063 Verification failed, please try again.");
 if (count < ${expectedRuns}) process.exitCode = 1;
-else console.log(JSON.stringify({ type: "summary", summary: { succeeded: 1 } }));
+else {
+  await fs.mkdir(${JSON.stringify(path.join(testRoot, batchId, "account-002"))}, { recursive: true });
+  await fs.writeFile(${JSON.stringify(path.join(testRoot, batchId, "account-002", "result.json"))}, JSON.stringify({ ok: true, email: "second@example.test", user: "MiniMax100002", runDir: ${JSON.stringify(path.join(testRoot, batchId, "account-002"))} }, null, 2));
+}
 `, "utf8");
   const env = {
     ...process.env,
@@ -84,9 +87,54 @@ else console.log(JSON.stringify({ type: "summary", summary: { succeeded: 1 } }))
   console.log(JSON.stringify({ ok: true, case: name, childRuns: expectedRuns, phase: status.phase, staleMarkerIgnored: Boolean(staleMarker), restartCount: status.restartCount }));
 }
 
+async function runNetworkGlitchCase() {
+  await fs.rm(testRoot, { recursive: true, force: true });
+  await fs.mkdir(testRoot, { recursive: true });
+  await writeJson(path.join(testRoot, batchId, "account-001", "result.json"), {
+    ok: true,
+    email: "existing@example.test",
+    user: "MiniMax100001",
+    runDir: path.join(testRoot, batchId, "account-001"),
+  });
+  await fs.writeFile(batchScript, `
+import fs from "node:fs/promises";
+const counterPath = ${JSON.stringify(counterPath)};
+const count = Number(await fs.readFile(counterPath, "utf8").catch(() => "0")) + 1;
+await fs.writeFile(counterPath, String(count));
+if (count === 1) {
+  console.error("POST /api/plugin-signin HTTP 400: ECONNRESET: The socket connection was closed unexpectedly.");
+  process.exitCode = 1;
+} else {
+  await fs.mkdir(${JSON.stringify(path.join(testRoot, batchId, "account-002"))}, { recursive: true });
+  await fs.writeFile(${JSON.stringify(path.join(testRoot, batchId, "account-002", "result.json"))}, JSON.stringify({ ok: true, email: "second@example.test", user: "MiniMax100002", runDir: ${JSON.stringify(path.join(testRoot, batchId, "account-002"))} }, null, 2));
+}
+`, "utf8");
+  const env = {
+    ...process.env,
+    BATCH_ROOT: testRoot,
+    BATCH_ID: batchId,
+    COUNT: "2",
+    TARGET_SUCCESS_COUNT: "2",
+    MINIMAX_BATCH_SCRIPT: batchScript,
+    MINIMAX_RETRY_DELAY_MS: "50",
+    NODE_NO_WARNINGS: "1",
+  };
+  const child = spawn(process.execPath, [supervisor], { cwd: workspace, env, stdio: "ignore" });
+  await waitFor(async () => Number(await fs.readFile(counterPath, "utf8").catch(() => "0")) >= 2, 15000);
+  await new Promise((resolve) => child.once("exit", resolve));
+  const status = await readJson(statusPath, {});
+  assert.equal(status.phase, "done");
+  assert.equal(status.running, false);
+  assert.equal(status.succeeded, 2);
+  assert.equal(status.restartCount, 1);
+  assert.ok(!/环境暂不可用/.test(status.message || ""));
+  console.log(JSON.stringify({ ok: true, case: "network-glitch-recovers", phase: status.phase, restartCount: status.restartCount }));
+}
+
 async function main() {
   await runCase("verification-failure-retries", 2, false);
   await runCase("stale-risk-marker-ignored", 2, true);
+  await runNetworkGlitchCase();
   await fs.rm(testRoot, { recursive: true, force: true });
 }
 

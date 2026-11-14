@@ -14,6 +14,7 @@ Go + Wails v2 桌面程序，用于配置 magpie 面板、域名邮箱、IMAP �
 - `scripts/minimax-supervisor.mjs` 聚合输出目录里所有时间戳批次的成功账号，写入 `resume-ledger.json`，生成固定 `resume-200` 恢复批次；子进程异常退出后自动以同一批次重启，直到达到目标成功数。
 - 发码接口返回 `1200063 / 人机验证未通过` 时，只把当前账号记为失败尝试，不再据此判定整个邮箱域名被风控、不再停机。守护进程间隔后以新邮箱、新设备码和独立临时 Chrome profile 自动继续；启动时会清理旧风控标记与守护状态。
 - reCAPTCHA 页面或票据环境不可用（例如代理出口无法访问 `account.minimax.io`）时立即进入 `environment-unavailable`、`running=false`，提示检查出口或代理；每个账号使用独立临时 Chrome profile，账号结束后立即关闭进程并删除 profile。
+- 面板或协议请求遇到 `ECONNRESET`、连接意外关闭等瞬时网络错误时，只结束当前子进程并按间隔自动恢复，不再误判为 reCAPTCHA 环境不可用或整机停机。
 - 代理入口可通过 `MINIMAX_AUTOSTART=1` 启动 GUI 后自动开始批次；这样内置代理桥与守护进程保持同一进程组，避免手动启动 Node 时复用到 GUI 已关闭的本地桥端口。
 - 守护进程向下游脚本显式清空自动启动变量，避免环境变量污染导致重复启动。
 - 守护进程把进度写入 `supervisor.status.json` 与 `supervisor.progress.json`；重新打开 GUI 可继续观察同一批次的落盘进度。

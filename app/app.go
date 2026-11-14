@@ -37,7 +37,7 @@ func (app *App) startup(ctx context.Context) {
 		status, statusErr := readSupervisorStatus(cfg.OutputDir)
 		if statusErr == nil && status.Running && processAlive(status.PID) {
 			_ = app.runner.Start(cfg, false)
-		} else if statusErr == nil && !status.Running && status.Phase == "domain-blocked" {
+		} else if statusErr == nil && !status.Running && (status.Phase == "domain-blocked" || status.Phase == "environment-unavailable") {
 			if _, err := clearRunState(cfg.OutputDir, false); err == nil {
 				app.runner.setStatus(RunStatus{Running: false, Phase: "idle", Message: "旧风控状态已清理，可以重新开始", Count: cfg.Count})
 			}
