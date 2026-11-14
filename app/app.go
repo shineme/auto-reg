@@ -50,11 +50,6 @@ func (app *App) shutdown(ctx context.Context) {
 	app.job.Stop()
 }
 
-func (app *App) beforeClose(ctx context.Context) bool {
-	app.shutdown(ctx)
-	return false
-}
-
 func (app *App) GetConfig() (Config, error) {
 	return LoadConfig()
 }

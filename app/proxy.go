@@ -65,20 +65,24 @@ func (bridge *proxyBridge) Stop() {
 }
 
 func proxyEnv(localProxy string) []string {
+	direct := []string{
+		"WINHTTP_PROXY=",
+		"winhttp_proxy=",
+	}
 	if localProxy == "" {
-		return []string{
+		return append(direct,
 			"NODE_USE_ENV_PROXY=",
 			"HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=",
 			"http_proxy=", "https_proxy=", "all_proxy=",
 			"MINIMAX_PROXY_URL=",
 			"NO_PROXY=*", "no_proxy=*",
-		}
+		)
 	}
-	env := []string{
+	env := append(direct,
 		"NODE_USE_ENV_PROXY=1",
 		"NO_PROXY=localhost,127.0.0.1,::1",
 		"no_proxy=localhost,127.0.0.1,::1",
-	}
+	)
 	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"} {
 		env = append(env, key+"="+localProxy)
 	}
