@@ -101,7 +101,11 @@ type runner struct {
 }
 
 func newRunner(app *App) *runner {
-	return &runner{app: app, status: RunStatus{Phase: "idle", Message: "准备就绪"}}
+	return &runner{
+		app:    app,
+		status: RunStatus{Phase: "idle", Message: "准备就绪"},
+		events: make([]RunEvent, 0),
+	}
 }
 
 func (runner *runner) emit(event RunEvent) {
@@ -264,7 +268,9 @@ func (runner *runner) Status() RunStatus {
 func (runner *runner) Events() []RunEvent {
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
-	return append([]RunEvent(nil), runner.events...)
+	events := make([]RunEvent, len(runner.events))
+	copy(events, runner.events)
+	return events
 }
 
 func (runner *runner) execute(ctx context.Context, cfg Config, dryRun bool) error {

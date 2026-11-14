@@ -168,7 +168,8 @@ function renderResults(results) {
 async function refreshResults() {
   if (!go) return;
   try {
-    const results = await go.GetLatestResults();
+    const response = await go.GetLatestResults();
+    const results = Array.isArray(response) ? response : [];
     for (const result of results) {
       const key = result.email || result.userCode || result.signInId || result.runDir;
       if (key) liveResults.set(key, result);
@@ -255,12 +256,13 @@ async function init() {
   });
 
   try {
-    fillForm(await go.GetConfig());
-    renderStatus(await go.GetRunStatus());
-    const events = await go.GetRunEvents();
+    fillForm((await go.GetConfig()) || {});
+    renderStatus((await go.GetRunStatus()) || {});
+    const response = await go.GetRunEvents();
+    const events = Array.isArray(response) ? response : [];
     if (events.length) { element("log-list").innerHTML = ""; events.forEach(appendLog); }
     await refreshResults();
-  } catch (error) { toast(`加载配置失败：${error.message || error}`, "error"); }
+  } catch (error) { toast(`加载界面数据失败：${error.message || error}`, "error"); }
   await checkRuntime();
 }
 
