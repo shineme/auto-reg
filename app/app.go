@@ -16,10 +16,15 @@ type App struct {
 	ctx    context.Context
 	bridge *proxyBridge
 	runner *runner
+	job    *processJob
 }
 
 func NewApp() *App {
-	app := &App{bridge: &proxyBridge{}}
+	job, err := newProcessJob()
+	if err != nil {
+		panic(err)
+	}
+	app := &App{bridge: &proxyBridge{}, job: job}
 	app.runner = newRunner(app)
 	return app
 }
@@ -40,7 +45,14 @@ func (app *App) startup(ctx context.Context) {
 }
 
 func (app *App) shutdown(ctx context.Context) {
+	app.runner.Stop()
 	app.bridge.Stop()
+	app.job.Stop()
+}
+
+func (app *App) beforeClose(ctx context.Context) bool {
+	app.shutdown(ctx)
+	return false
 }
 
 func (app *App) GetConfig() (Config, error) {

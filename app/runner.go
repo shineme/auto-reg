@@ -98,11 +98,12 @@ type RunEvent struct {
 }
 
 type runner struct {
-	app    *App
-	mu     sync.Mutex
-	cancel context.CancelFunc
-	status RunStatus
-	events []RunEvent
+	app       *App
+	mu        sync.Mutex
+	cancel    context.CancelFunc
+	status    RunStatus
+	events    []RunEvent
+	outputDir string
 }
 
 func newRunner(app *App) *runner {
@@ -144,6 +145,7 @@ func (runner *runner) setStatus(status RunStatus) {
 }
 
 func (runner *runner) Start(cfg Config, dryRun bool) error {
+	cleanStaleSupervisorState(cfg.OutputDir)
 	runner.mu.Lock()
 	if runner.cancel != nil {
 		runner.mu.Unlock()
@@ -209,14 +211,26 @@ func (runner *runner) Stop() {
 	runner.mu.Lock()
 	cancel := runner.cancel
 	status := runner.status
+	outputDir := runner.outputDir
+	job := runner.app.job
 	runner.mu.Unlock()
+	if job != nil {
+		registeredPID := job.PID()
+		if registeredPID > 0 {
+			terminateProcessTree(registeredPID)
+		}
+		job.Stop()
+	}
 	if status.SupervisorPID != 0 {
-		command := exec.Command("taskkill.exe", "/PID", fmt.Sprintf("%d", status.SupervisorPID), "/T", "/F")
-		_ = command.Run()
+		terminateProcessTree(status.SupervisorPID)
+	}
+	if outputDir != "" {
+		markSupervisorStopped(outputDir, status.SupervisorPID)
 	}
 	if cancel != nil {
 		cancel()
 	}
+	runner.setStatus(RunStatus{Running: false, Phase: "stopped", Message: "软件已关闭，后台任务已停止", Count: status.Count, BatchID: status.BatchID})
 }
 
 func processAlive(processID int) bool {
@@ -263,6 +277,9 @@ func (runner *runner) execute(ctx context.Context, cfg Config, dryRun bool) erro
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	runner.mu.Lock()
+	runner.outputDir = cfg.OutputDir
+	runner.mu.Unlock()
 	if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
 		return err
 	}
@@ -343,14 +360,25 @@ func (runner *runner) execute(ctx context.Context, cfg Config, dryRun bool) erro
 	}
 	if !dryRun {
 		command.SysProcAttr = &windows.SysProcAttr{
-			CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW,
+			CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW | windows.CREATE_SUSPENDED,
 		}
+		command.SysProcAttr.CreationFlags &^= windows.CREATE_BREAKAWAY_FROM_JOB
 		command.Stdout = nil
 		command.Stderr = nil
 	}
 	runner.setStatus(RunStatus{Running: true, Phase: "starting", Message: "正在启动批量注册守护进程", Count: cfg.Count, BatchID: batchID})
 	if err := command.Start(); err != nil {
 		return err
+	}
+	if !dryRun {
+		if err := runner.app.job.Track(command.Process.Pid); err != nil {
+			_ = command.Process.Kill()
+			return fmt.Errorf("无法绑定后台进程：%w", err)
+		}
+		if err := resumeProcess(command.Process.Pid); err != nil {
+			_ = command.Process.Kill()
+			return fmt.Errorf("无法启动后台进程：%w", err)
+		}
 	}
 	runner.mu.Lock()
 	status := runner.status
@@ -362,6 +390,59 @@ func (runner *runner) execute(ctx context.Context, cfg Config, dryRun bool) erro
 	go runner.watchSupervisor(ctx, cfg, batchID, command.Process.Pid)
 	_ = command.Process.Release()
 	return nil
+}
+
+func terminateProcessTree(processID int) {
+	if processID <= 0 {
+		return
+	}
+	command := exec.Command("taskkill.exe", "/PID", fmt.Sprintf("%d", processID), "/T", "/F")
+	_ = command.Run()
+}
+
+func markSupervisorStopped(outputDir string, processID int) {
+	statusPath := filepath.Join(outputDir, "supervisor.status.json")
+	statusData, err := os.ReadFile(statusPath)
+	if err != nil {
+		return
+	}
+	var status SupervisorStatus
+	if err := json.Unmarshal(statusData, &status); err != nil {
+		return
+	}
+	if status.PID != 0 && status.PID != processID {
+		return
+	}
+	status.Running = false
+	status.Phase = "stopped"
+	status.Message = "软件已关闭，后台任务已停止"
+	status.HeartbeatAt = time.Now().UTC().Format(time.RFC3339Nano)
+	encoded, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(statusPath, encoded, 0o600)
+	_ = os.Remove(filepath.Join(outputDir, "supervisor.lock"))
+}
+
+func cleanStaleSupervisorState(outputDir string) {
+	status, err := readSupervisorStatus(outputDir)
+	if err != nil {
+		return
+	}
+	if status.PID <= 0 || processAlive(status.PID) {
+		return
+	}
+	status.Running = false
+	status.Phase = "stopped"
+	status.Message = "软件已关闭，后台任务已停止"
+	status.HeartbeatAt = time.Now().UTC().Format(time.RFC3339Nano)
+	encoded, marshalErr := json.MarshalIndent(status, "", "  ")
+	if marshalErr != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(outputDir, "supervisor.status.json"), encoded, 0o600)
+	_ = os.Remove(filepath.Join(outputDir, "supervisor.lock"))
 }
 
 func (runner *runner) finishFromSummary(summary SupervisorSummary, count int, batchID string, supervisorPID int) {
