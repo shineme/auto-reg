@@ -1,0 +1,40 @@
+# Runtime artifacts and results
+artifacts/
+*.log
+*.tmp
+*.local
+*.local.json
+supervisor.lock
+supervisor.status.json
+supervisor.progress.json
+risk-state.json
+risk-control.json
+resume-ledger.json
+
+# Local secrets and generated config
+.env
+.env.*
+!.env.example
+config.json
+
+# Build output
+app/build/
+app/build/bin/
+*.exe
+node_modules/
+dist/
+
+# Browser profiles and temporary bridges
+**/chrome-*-profile/
+**/chrome-gui-profile/
+**/chrome-fast-profile/
+*.port
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Design tooling metadata is not runtime state; keep it tracked.
+!.impeccable/

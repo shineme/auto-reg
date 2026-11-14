@@ -1,0 +1,10 @@
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+const mailPrefix = process.env.MAIL_PREFIX || "mm";
+const mailDomain = process.env.MAIL_DOMAIN || "example.com";
+const email = `${mailPrefix}${crypto.randomBytes(5).toString("hex")}@${mailDomain}`;
+const password = `Mm!${crypto.randomBytes(12).toString("base64url")}`;
+const config = { userCode: process.env.USER_CODE || "", email, password, createdAt: new Date().toISOString() };
+await fs.mkdir("artifacts", { recursive: true });
+await fs.writeFile("artifacts/run-config.json", JSON.stringify(config, null, 2), "utf8");
+console.log(JSON.stringify({ ...config, passwordLength: password.length }, null, 2));

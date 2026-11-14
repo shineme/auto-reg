@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MiniMax 协议注册工作台</title>
+  <link rel="stylesheet" href="/main.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div><strong>MiniMax Registrar</strong><span>协议批量工作台</span></div>
+      </div>
+      <nav class="nav" aria-label="主导航">
+        <button class="nav-item active" data-view="setup">运行配置</button>
+        <button class="nav-item" data-view="results">账号结果</button>
+        <button class="nav-item" data-view="logs">执行日志</button>
+      </nav>
+      <div class="runtime-card" id="runtime-card">
+        <span class="section-label">运行环境</span>
+        <div class="runtime-row"><span>Node.js</span><b id="runtime-node">检查中</b></div>
+        <div class="runtime-row"><span>Chrome</span><b id="runtime-chrome">检查中</b></div>
+        <div class="runtime-row"><span>协议脚本</span><b id="runtime-scripts">检查中</b></div>
+        <button class="text-button" id="check-runtime">重新检查</button>
+      </div>
+      <div class="sidebar-foot">
+        <span>配置与凭据仅保存在本机</span>
+        <button class="text-button" id="open-output">打开输出目录</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="view-title">运行配置</h1>
+          <p id="view-subtitle">配置域名邮箱、收信邮箱、代理与批量参数，然后启动协议链路。</p>
+        </div>
+        <div class="status-pill" id="status-pill"><span></span>准备就绪</div>
+      </header>
+
+      <section class="view active" id="view-setup">
+        <form id="config-form" class="config-grid">
+          <section class="panel panel-wide">
+            <div class="panel-head">
+              <div><h2>面板与账号域名</h2><p>生成设备码的 magpie 面板，以及新账号使用的邮箱域名。</p></div>
+              <span class="panel-index">PANEL</span>
+            </div>
+            <div class="fields two-col">
+              <label class="field"><span>面板地址</span><input name="panelBase" autocomplete="off" /></label>
+              <label class="field"><span>面板密钥</span><input name="panelKey" type="password" autocomplete="off" /></label>
+              <label class="field"><span>邮箱域名</span><input name="mailDomain" placeholder="example.com" autocomplete="off" /></label>
+              <label class="field"><span>邮箱前缀</span><input name="mailPrefix" placeholder="mm" autocomplete="off" /></label>
+            </div>
+            <p class="hint">生成格式：<code id="email-preview">mm&lt;random&gt;@example.com</code></p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div><h2>接码邮箱 IMAP</h2><p>授权码用于读取验证码，不会写入日志。</p></div>
+              <span class="panel-index">MAIL</span>
+            </div>
+            <div class="fields">
+              <label class="field"><span>收件邮箱 / 别名</span><input name="mailbox" autocomplete="off" /></label>
+              <div class="fields two-col compact">
+                <label class="field"><span>IMAP 主机</span><input name="imapHost" autocomplete="off" /></label>
+                <label class="field"><span>IMAP 端口</span><input name="imapPort" type="number" min="1" max="65535" /></label>
+              </div>
+              <label class="field"><span>IMAP 登录名</span><input name="imapUser" autocomplete="off" /></label>
+              <label class="field"><span>IMAP 授权码</span><input name="imapPassword" type="password" autocomplete="off" /></label>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div><h2>出口代理</h2><p>HTTP 或 SOCKS5；支持 <code>http\://</code> 转义和省略 <code>@</code> 的紧凑格式。</p></div>
+              <span class="panel-index">PROXY</span>
+            </div>
+            <div class="fields">
+              <label class="field"><span>代理 URL</span><textarea name="proxyUrl" rows="3" spellcheck="false" placeholder="socks5://example-user:pass:proxy.example.com:10000"></textarea></label>
+              <div class="proxy-examples">
+                <code>socks5://user:pass@host:10000</code>
+                <code>http://user:pass:host:10000</code>
+              </div>
+              <p class="hint" id="proxy-hint">留空表示使用系统直连；批量运行时会启动本地代理桥。</p>
+            </div>
+          </section>
+
+          <section class="panel panel-wide">
+            <div class="panel-head">
+              <div><h2>执行参数</h2><p>协议提交串行，票据预热可并发；每个账号仍有独立会话。</p></div>
+              <span class="panel-index">RUN</span>
+            </div>
+            <div class="fields four-col">
+              <label class="field"><span>批量数量</span><input name="count" type="number" min="1" max="200" /></label>
+              <label class="field"><span>预热并发</span><input name="prewarmConcurrency" type="number" min="1" max="16" /></label>
+              <label class="field"><span>CDP 端口</span><input name="cdpPort" type="number" min="1" max="65535" /></label>
+              <label class="field"><span>输出目录</span><input name="outputDir" autocomplete="off" /></label>
+              <label class="field span-2"><span>Chrome 路径</span><input name="chromePath" autocomplete="off" /></label>
+              <label class="field span-2"><span>协议脚本目录</span><input name="scriptsDir" autocomplete="off" /></label>
+            </div>
+          </section>
+        </form>
+
+        <div class="action-bar">
+          <div class="progress-block">
+            <div class="progress-meta"><span id="progress-label">等待启动</span><b id="progress-counter">0 / 0</b></div>
+            <div class="progress-track"><div id="progress-fill"></div></div>
+            <div class="progress-detail" id="progress-detail">成功 0 · 失败 0 · 准备就绪</div>
+          </div>
+          <div class="actions">
+            <button class="button secondary" id="test-panel">测试面板连接</button>
+            <button class="button secondary" id="save-config">保存配置</button>
+            <button class="button secondary" id="dry-run">票据 dry-run</button>
+            <button class="button secondary" id="stop-run" disabled>停止</button>
+            <button class="button primary" id="start-run">开始批量注册</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-results">
+        <div class="panel panel-wide">
+          <div class="panel-head">
+            <div><h2>最近一批结果</h2><p>只有 MiniMax 授权 approved、magpie done、供应商列表包含账号才算成功。</p></div>
+            <button class="button secondary" id="refresh-results">刷新</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>状态</th><th>邮箱</th><th>面板账号</th><th>设备码</th><th>错误</th></tr></thead>
+              <tbody id="results-body"><tr><td colspan="5" class="empty">暂无结果；完成一次运行后会显示在这里。</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-logs">
+        <div class="panel panel-wide">
+          <div class="panel-head">
+            <div><h2>执行日志</h2><p>敏感凭据和票据会在写入日志前遮蔽。</p></div>
+            <button class="button secondary" id="clear-logs">清空显示</button>
+          </div>
+          <div class="log-list" id="log-list" aria-live="polite"><div class="empty">等待运行事件。</div></div>
+        </div>
+      </section>
+      <div class="toast" id="toast" role="status"></div>
+    </main>
+  </div>
+  <script src="/main.js"></script>
+</body>
+</html>
