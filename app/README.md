@@ -8,18 +8,18 @@ Go + Wails v2 桌面程序，用于配置 magpie 面板、域名邮箱、IMAP �
 - 配置收件邮箱、IMAP 主机/端口/登录名/授权码。
 - 支持 `socks5://user:pass@host:port`、`http://user:pass@host:port`、省略 `@` 的 `socks5://user:pass:host:port` 和转义后的 `http\://...`。
 - 自动把 SOCKS5 或带认证的 HTTP 上游代理桥接成本地 HTTP CONNECT 代理，供 Node 协议脚本和 Chrome 共用同一出口。
-- 配置批量数量、票据预热并发、CDP 端口、Chrome 路径、协议脚本目录和输出目录。
+- 配置批量数量、Chrome 路径、协议脚本目录和输出目录；CDP 端口由每个临时浏览器自动分配。
 - 启动/停止运行、票据 dry-run、实时日志、运行状态、最近结果表、打开输出目录。
 - 实时显示成功数、失败数、当前账号阶段、自动恢复次数、恢复批次和守护进程 PID。
 - `scripts/minimax-supervisor.mjs` 聚合输出目录里所有时间戳批次的成功账号，写入 `resume-ledger.json`，生成固定 `resume-200` 恢复批次；子进程异常退出后自动以同一批次重启，直到达到目标成功数。
 - 发码接口返回 `1200063 / 人机验证未通过` 时，批量脚本以退出码 `75` 停止并写 `risk-control.json`；守护进程进入 `risk-cooldown`，默认冷却 30 分钟，期间保持任务运行、不连续创建设备码，冷却结束后只执行一次注册探测。
-- reCAPTCHA 页面或票据环境不可用（例如代理出口无法访问 `account.minimax.io`、旧 CDP Chrome 指向已退出的本地代理桥）也按同一冷却策略处理；程序会记录当前 Chrome 的代理状态，切换代理或直连后自动重建 CDP Chrome。
+- reCAPTCHA 页面或票据环境不可用（例如代理出口无法访问 `account.minimax.io`）也按同一冷却策略处理；每个账号使用独立临时 Chrome profile，账号结束后立即关闭进程并删除 profile。
 - 代理入口可通过 `MINIMAX_AUTOSTART=1` 启动 GUI 后自动开始批次；这样内置代理桥与守护进程保持同一进程组，避免手动启动 Node 时复用到 GUI 已关闭的本地桥端口。
 - 守护进程向下游脚本显式覆盖 `MINIMAX_RISK_PROBE` 与自动启动变量，避免环境变量污染导致完整批次被误当作单次探测。
 - 守护进程把进度写入 `supervisor.status.json` 与 `supervisor.progress.json`；重新打开 GUI 可继续观察同一批次的落盘进度。
-- 关闭窗口会调用 `OnBeforeClose`/`OnShutdown`，通过 Windows Job Object 和显式进程树清理停止守护程序、Node 子进程、Chrome/CDP 与本地代理桥，并把 `supervisor.status.json` 标记为 `stopped`、删除 `supervisor.lock`。
+- 关闭窗口会调用 `OnShutdown`，通过 Windows Job Object 和显式进程树清理停止守护程序、Node 子进程、Chrome/CDP 与本地代理桥，并把 `supervisor.status.json` 标记为 `stopped`、删除 `supervisor.lock`。
 - 「测试面板连接」按钮只做非 mutating 检查：登录面板、保存 303 的会话 Cookie、读取 `/api/providers`，不会调用 `/api/plugin-signin` 或创建账号。
-- 配置保存在当前用户配置目录，权限为仅当前用户可读写；日志输出会遮蔽凭据和票据。
+- 配置保存在当前用户配置目录，权限为仅当前用户可读写；日志输出会遮蔽凭据和票据。每个账号的 `session.json` 记录该次临时 profile 路径、CDP 端口和 Chrome PID，便于核对隔离与及时清理。
 
 ## 运行前提
 

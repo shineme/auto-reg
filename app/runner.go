@@ -320,12 +320,10 @@ func (runner *runner) execute(ctx context.Context, cfg Config, dryRun bool) erro
 		"MAIL_PREFIX="+cfg.MailPrefix,
 		fmt.Sprintf("COUNT=%d", cfg.Count),
 		fmt.Sprintf("TARGET_SUCCESS_COUNT=%d", cfg.Count),
-		fmt.Sprintf("PREWARM_CONCURRENCY=%d", cfg.PrewarmConcurrency),
 		"CHROME_PATH="+cfg.ChromePath,
-		"CHROME_PROFILE="+filepath.Join(cfg.OutputDir, "chrome-gui-profile"),
+		"CHROME_PROFILE_ROOT="+filepath.Join(cfg.OutputDir, "chrome-profiles"),
 		"BATCH_ROOT="+cfg.OutputDir,
 		"BATCH_ID="+batchID,
-		fmt.Sprintf("CDP_PORT=%d", cfg.CDPPort),
 		"NODE_NO_WARNINGS=1",
 	)
 	env = append(env, proxyEnv(localProxy)...)

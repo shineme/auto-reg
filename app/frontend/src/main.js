@@ -24,7 +24,7 @@ function readForm() {
   const data = new FormData(form);
   const config = {};
   for (const [key, value] of data.entries()) config[key] = value;
-  for (const key of ["imapPort", "count", "prewarmConcurrency", "cdpPort"]) config[key] = numberValue(key);
+  for (const key of ["imapPort", "count"]) config[key] = numberValue(key);
   return config;
 }
 

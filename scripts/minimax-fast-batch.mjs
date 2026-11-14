@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import net from "node:net";
 
 const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const panelBase = process.env.PANEL_BASE || "https://panel.example.com";
@@ -13,19 +14,18 @@ const mailDomain = process.env.MAIL_DOMAIN || "example.com";
 const mailPrefix = process.env.MAIL_PREFIX || "mm";
 const proxyUrl = process.env.MINIMAX_PROXY_URL || "";
 const cdpHost = process.env.CDP_HOST || "127.0.0.1";
-const cdpPort = Number(process.env.CDP_PORT || 9333);
 const chromePath = process.env.CHROME_PATH || "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-const chromeProfile = process.env.CHROME_PROFILE || path.join(workspace, "artifacts", "chrome-fast-profile");
 const batchRoot = process.env.BATCH_ROOT || path.join(workspace, "artifacts", "fast-batch");
 const batchId = process.env.BATCH_ID || new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
 const root = path.join(batchRoot, batchId);
+const chromeProfileRoot = process.env.CHROME_PROFILE_ROOT || path.join(root, "chrome-profiles");
 const summaryPath = path.join(root, "summary.json");
 const count = Number(process.env.COUNT || 1);
 const targetSuccessCount = Math.max(1, Number(process.env.TARGET_SUCCESS_COUNT || count));
+const cdpStartupTimeoutMs = Math.max(5000, Number(process.env.CDP_STARTUP_TIMEOUT_MS || 30000));
 const restartCount = Number(process.env.MINIMAX_RESTART_COUNT || 0);
 const dryRun = process.env.DRY_RUN === "1";
 const panelCheckOnly = process.env.PANEL_CHECK_ONLY === "1";
-const prewarmConcurrency = Number(process.env.PREWARM_CONCURRENCY || 4);
 const signInPollSeconds = Number(process.env.SIGN_IN_POLL_SECONDS || 90);
 const captchaReadyAttempts = Number(process.env.CAPTCHA_READY_ATTEMPTS || 60);
 const captchaPrewarmUrl = process.env.CAPTCHA_PREWARM_URL || "https://account.minimax.io/unified-login";
@@ -36,6 +36,7 @@ const riskProbe = process.env.MINIMAX_RISK_PROBE === "1";
 const riskControlPath = path.join(root, "risk-control.json");
 const siteKey = process.env.MINIMAX_RECAPTCHA_SITE_KEY || "";
 const captchaAction = "send_code";
+const captchaPrewarmHost = "account.minimax.io";
 const uniqueUserIdKey = "mmx_account_UNIQUE_USER_ID";
 const deviceIdKey = "mmx_account_USER_HARD_WARE_INFO";
 const userDetailKey = "user_detail_agent";
@@ -56,6 +57,35 @@ let progressState = {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
+    }),
+  ]);
+}
+
+async function pathExists(filePath) {
+  try {
+    await fs.stat(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function processIsAlive(processId) {
+  if (!processId) return false;
+  try {
+    process.kill(processId, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
 }
 
 function prewarmUrl(userCode, loginRedirect) {
@@ -228,77 +258,128 @@ async function panelFetch(pathname, options = {}, expectJson = true) {
   }
 }
 
-async function cdpVersion() {
-  const response = await fetch(`http://${cdpHost}:${cdpPort}/json/version`);
+async function cdpVersion(port) {
+  const response = await fetch(`http://${cdpHost}:${port}/json/version`);
   if (!response.ok) throw new Error(`CDP version HTTP ${response.status}`);
   return response.json();
 }
 
-async function ensureCdpBrowser() {
-  const statePath = path.join(chromeProfile, "proxy-state.json");
-  try {
-    const version = await cdpVersion();
-    const savedState = await readJson(statePath);
-    if (savedState?.proxyUrl === proxyUrl && savedState?.cdpPort === cdpPort) return version;
+async function waitForCdpPort(profileDir) {
+  const portPath = path.join(profileDir, "DevToolsActivePort");
+  const deadline = Date.now() + cdpStartupTimeoutMs;
+  while (Date.now() < deadline) {
     try {
-      const socket = new WebSocket(version.webSocketDebuggerUrl);
-      await new Promise((resolve, reject) => {
-        socket.onopen = resolve;
-        socket.onerror = reject;
-      });
-      await cdpCall(socket, "Browser.close", {});
-      socket.close();
-    } catch {}
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      try {
-        await cdpVersion();
-      } catch {
-        break;
-      }
+      const [portText] = (await fs.readFile(portPath, "utf8")).split(/\r?\n/);
+      const port = Number(portText);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("invalid DevToolsActivePort");
+      return await cdpVersion(port);
+    } catch {
       await delay(200);
     }
-  } catch {}
-  await fs.mkdir(chromeProfile, { recursive: true });
-  await writeJson(statePath, { proxyUrl, cdpPort, updatedAt: new Date().toISOString() });
+  }
+  throw new Error(`CDP browser did not become ready (${path.basename(profileDir)})`);
+}
+
+async function reserveCdpPort() {
+  const server = net.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, cdpHost, resolve);
+  });
+  const port = server.address().port;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+function chromeProxyArgument() {
+  if (!proxyUrl) return "";
+  const parsed = new URL(proxyUrl);
+  if (!["http:", "https:", "socks5:"].includes(parsed.protocol)) throw new Error(`Unsupported Chrome proxy scheme: ${parsed.protocol}`);
+  if (parsed.protocol === "socks5:") return `socks5://${parsed.host}`;
+  const credentials = parsed.username
+    ? `${decodeURIComponent(parsed.username)}${parsed.password ? `:${decodeURIComponent(parsed.password)}` : ""}@`
+    : "";
+  return `${parsed.protocol}//${credentials}${parsed.host}`;
+}
+
+async function startCdpBrowser(profileDir) {
+  await fs.rm(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  await fs.mkdir(profileDir, { recursive: true });
+  const port = await reserveCdpPort();
+  await fs.writeFile(path.join(profileDir, "DevToolsActivePort"), `${port}\n`, "utf8");
   const args = [
-    `--remote-debugging-port=${cdpPort}`,
-    `--user-data-dir=${chromeProfile}`,
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profileDir}`,
     "--no-first-run",
     "--no-default-browser-check",
     "--disable-background-networking",
+    "--disable-features=Translate",
+    "--disable-component-update",
+    "--disable-domain-reliability",
+    "--no-pings",
     "--window-position=-32000,-32000",
     `--window-size=${screenWidth},${screenHeight}`,
   ];
-  if (proxyUrl) args.push(`--proxy-server=${proxyUrl}`);
+  const proxyArgument = chromeProxyArgument();
+  if (proxyArgument) args.push(`--proxy-server=${proxyArgument}`);
   args.push("about:blank");
-  const child = spawn(chromePath, args, { detached: true, stdio: "ignore", windowsHide: true });
-  child.unref();
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      return await cdpVersion();
-    } catch {
-      await delay(500);
-    }
+  const child = spawn(chromePath, args, { stdio: "ignore", windowsHide: true });
+  const browser = { child, profileDir, version: null, port: 0 };
+  try {
+    browser.version = await waitForCdpPort(profileDir);
+    browser.port = Number(new URL(browser.version.webSocketDebuggerUrl).port);
+    return browser;
+  } catch (error) {
+    await terminateProcessTree(child);
+    await removeCdpProfile(browser);
+    throw error;
   }
-  throw new Error(`CDP browser did not become ready on ${cdpHost}:${cdpPort}`);
 }
 
 function cdpCall(socket, method, params = {}, sessionId) {
   const id = nextCommandId++;
   return new Promise((resolve, reject) => {
-    pendingCommands.set(id, { resolve, reject });
+    const timer = setTimeout(() => {
+      pendingCommands.delete(id);
+      reject(new Error(`CDP ${method} timed out`));
+    }, 30000);
+    pendingCommands.set(id, {
+      resolve: (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      reject: (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    });
     const message = { id, method, params };
     if (sessionId) message.sessionId = sessionId;
-    socket.send(JSON.stringify(message));
+    try {
+      socket.send(JSON.stringify(message));
+    } catch (error) {
+      clearTimeout(timer);
+      pendingCommands.delete(id);
+      reject(error);
+    }
   });
 }
 
-async function connectCdpBrowser() {
-  const version = await ensureCdpBrowser();
+function connectCdpSocket(version) {
   const socket = new WebSocket(version.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.onopen = resolve;
-    socket.onerror = reject;
+  let readySettled = false;
+  let rejectReady;
+  const ready = new Promise((resolve, reject) => {
+    rejectReady = reject;
+    socket.onopen = () => {
+      readySettled = true;
+      resolve();
+    };
+    socket.onerror = () => {
+      if (readySettled) return;
+      readySettled = true;
+      reject(new Error("CDP WebSocket connection failed"));
+    };
   });
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
@@ -309,10 +390,91 @@ async function connectCdpBrowser() {
     else resolve(message.result);
   };
   socket.onclose = () => {
+    if (!readySettled) {
+      readySettled = true;
+      rejectReady(new Error("CDP socket closed before open"));
+    }
     for (const { reject } of pendingCommands.values()) reject(new Error("CDP socket closed"));
     pendingCommands.clear();
   };
-  return { socket, call: (method, params, sessionId) => cdpCall(socket, method, params, sessionId) };
+  return { socket, ready, call: (method, params, sessionId) => cdpCall(socket, method, params, sessionId) };
+}
+
+async function connectCdpBrowser(version) {
+  const cdp = connectCdpSocket(version);
+  await cdp.ready;
+  return cdp;
+}
+
+async function terminateProcessTree(child) {
+  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === "win32") {
+    await new Promise((resolve) => {
+      const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+      killer.once("close", resolve);
+      killer.once("error", resolve);
+    });
+  } else {
+    try {
+      child.kill("SIGTERM");
+    } catch {}
+  }
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline && processIsAlive(child.pid)) await delay(100);
+}
+
+async function stopCdpBrowser(browser, cdp) {
+  if (cdp) {
+    try {
+      await withTimeout(cdp.call("Browser.close"), 5000, "CDP Browser.close");
+    } catch {}
+  }
+  await terminateProcessTree(browser?.child);
+  try {
+    cdp?.socket?.close();
+  } catch {}
+}
+
+async function removeCdpProfile(browser) {
+  if (!browser?.profileDir) return;
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    try {
+      await fs.rm(browser.profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      if (!(await pathExists(browser.profileDir))) return;
+    } catch {
+      await delay(250);
+    }
+  }
+  await fs.mkdir(root, { recursive: true });
+  await fs.appendFile(
+    path.join(root, "chrome-profile-cleanup-failures.jsonl"),
+    `${JSON.stringify({ at: new Date().toISOString(), profileDir: browser.profileDir, chromePid: browser.child?.pid || 0 })}\n`,
+    "utf8",
+  );
+  emitProgress("chrome-cleanup", "临时 Chrome profile 清理失败，请检查输出目录", { current: 0 });
+}
+
+async function withCdpBrowser(owner, worker) {
+  const label = String(owner?.index ?? owner?.name ?? "session").replace(/[^a-zA-Z0-9_-]/g, "-");
+  const profileDir = path.join(chromeProfileRoot, `${batchId}-${label}-${process.pid}-${crypto.randomBytes(4).toString("hex")}`);
+  let browser;
+  let cdp;
+  try {
+    browser = await startCdpBrowser(profileDir);
+    cdp = await connectCdpBrowser(browser.version);
+    return await worker(cdp, browser);
+  } finally {
+    try {
+      await stopCdpBrowser(browser, cdp);
+    } finally {
+      await removeCdpProfile(browser);
+    }
+  }
+}
+
+async function closeBrowserContext(cdp, context) {
+  await disposeBrowserContext(cdp, context?.browserContextId);
 }
 
 async function evaluate(cdp, sessionId, expression, options = {}) {
@@ -333,8 +495,13 @@ async function disposeBrowserContext(cdp, browserContextId) {
   } catch {}
 }
 
-async function prewarmAccount(cdp, task) {
+async function createAccountContext(cdp, task) {
   let browserContextId;
+  const observed = {
+    profileDir: task.browserProfileDir || "",
+    cdpPort: Number(task.browserCdpPort || 0),
+    chromePid: Number(task.browserChromePid || 0),
+  };
   try {
     ({ browserContextId } = await cdp.call("Target.createBrowserContext", { disposeOnDetach: true }));
     const { targetId } = await cdp.call("Target.createTarget", { url: "about:blank", browserContextId });
@@ -342,6 +509,7 @@ async function prewarmAccount(cdp, task) {
     await cdp.call("Page.enable", {}, sessionId);
     await cdp.call("Runtime.enable", {}, sessionId);
     await cdp.call("Network.enable", {}, sessionId);
+    await cdp.call("Network.setCacheDisabled", { cacheDisabled: true }, sessionId);
     await cdp.call("Emulation.setDeviceMetricsOverride", {
       width: screenWidth,
       height: screenHeight,
@@ -349,33 +517,34 @@ async function prewarmAccount(cdp, task) {
       mobile: false,
     }, sessionId);
     await cdp.call("Page.navigate", { url: task.prewarmUrl || prewarmUrl(task.userCode, task.loginRedirect) }, sessionId);
-    let ready = false;
+    let captchaPageReady = false;
     for (let attempt = 0; attempt < captchaReadyAttempts; attempt += 1) {
       const pageStateText = await evaluate(cdp, sessionId, `(function () {
         try {
           return JSON.stringify({
             href: location.href,
             ready: document.readyState,
-            grecaptcha: typeof window.grecaptcha !== "undefined" && typeof window.grecaptcha.enterprise !== "undefined"
+            grecaptcha: typeof window.grecaptcha !== "undefined" && typeof window.grecaptcha.enterprise !== "undefined",
+            host: location.host
           });
         } catch {
           return "{}";
         }
       })()`);
       const pageState = JSON.parse(pageStateText || "{}");
-      if (pageState.grecaptcha && pageState.ready === "complete") {
-        ready = true;
+      if (pageState.grecaptcha && pageState.ready === "complete" && pageState.host === captchaPrewarmHost) {
+        captchaPageReady = true;
         break;
       }
       await delay(500);
     }
-    if (!ready) throw new Error("reCAPTCHA Enterprise did not become ready");
+    if (!captchaPageReady) throw new Error("reCAPTCHA Enterprise did not become ready");
     const ticket = await evaluate(cdp, sessionId, `(async () => {
       await new Promise((resolve) => window.grecaptcha.enterprise.ready(resolve));
       return await window.grecaptcha.enterprise.execute("${siteKey}", { action: "${captchaAction}" });
     })()`, { awaitPromise: true, userGesture: true });
     if (typeof ticket !== "string" || !ticket) throw new Error("reCAPTCHA Enterprise returned no ticket");
-    const cookieResult = await cdp.call("Network.getCookies", { urls: ["https://account.minimax.io/"] }, sessionId);
+    const cookieResult = await cdp.call("Network.getCookies", { urls: [`https://${captchaPrewarmHost}/`] }, sessionId);
     const storageText = await evaluate(cdp, sessionId, `(function () {
       try {
         return JSON.stringify({
@@ -391,26 +560,16 @@ async function prewarmAccount(cdp, task) {
     for (const cookie of cookieResult.cookies || []) state.cookies[cookie.name] = cookie.value;
     if (storage.uuid) state.localStorage[uniqueUserIdKey] = storage.uuid;
     if (storage.deviceId) state.localStorage[deviceIdKey] = storage.deviceId;
-    await writeJson(task.statePath, state);
-    return { browserContextId, sessionId };
+    const stateWithBrowser = {
+      ...state,
+      browser: { ...observed, browserContextId, targetId, sessionId, prewarmUrl: task.prewarmUrl || prewarmUrl(task.userCode, task.loginRedirect) },
+    };
+    await writeJson(task.statePath, stateWithBrowser);
+    return { browserContextId, sessionId, observed };
   } catch (error) {
     await disposeBrowserContext(cdp, browserContextId);
     throw error;
   }
-}
-
-async function mapWithConcurrency(items, limit, worker) {
-  const results = new Array(items.length);
-  let nextIndex = 0;
-  async function runner() {
-    while (nextIndex < items.length) {
-      const currentIndex = nextIndex++;
-      results[currentIndex] = await worker(items[currentIndex], currentIndex);
-    }
-  }
-  const runners = Array.from({ length: Math.min(limit, items.length) }, runner);
-  await Promise.all(runners);
-  return results;
 }
 
 function runNodeScript(scriptPath, env, timeoutMs = 300000, progressHandler = () => {}) {
@@ -565,7 +724,7 @@ async function initializeTask(task) {
   await writeJson(task.configPath, { userCode: task.userCode, email: task.email, password: task.password, loginRedirect: task.loginRedirect, createdAt: new Date().toISOString() });
 }
 
-async function processAccount(cdp, task, beforeUsers, progressHandler) {
+async function processAccount(task, beforeUsers, progressHandler) {
   const startedAt = new Date().toISOString();
   try {
     if (!task.context) throw new Error(task.prewarmError || "CAPTCHA context unavailable");
@@ -611,8 +770,6 @@ async function processAccount(cdp, task, beforeUsers, progressHandler) {
     };
     if (!riskBlocked) await writeJson(task.resultPath, result);
     return { index: task.index, ok: false, error: error.message, riskBlocked, runDir: task.runDir, startedAt };
-  } finally {
-    if (task.context) await disposeBrowserContext(cdp, task.context.browserContextId);
   }
 }
 
@@ -638,26 +795,34 @@ async function writeSummary(results, finished = false) {
 
 async function runDryRun() {
   await fs.mkdir(root, { recursive: true });
-  const cdp = await connectCdpBrowser();
   const dummyCode = process.env.DRY_RUN_USER_CODE || "TEST-CODE";
-  const task = { prewarmUrl: prewarmUrl(dummyCode), statePath: path.join(root, "dryrun-session.json") };
-  try {
-    const context = await prewarmAccount(cdp, task);
+  const task = {
+    name: "dry-run",
+    prewarmUrl: prewarmUrl(dummyCode),
+    statePath: path.join(root, "dryrun-session.json"),
+  };
+  const result = await withCdpBrowser(task, async (cdp, browser) => {
+    const context = await createAccountContext(cdp, {
+      ...task,
+      browserProfileDir: browser.profileDir,
+      browserCdpPort: browser.port,
+      browserChromePid: browser.child.pid,
+    });
     const state = await readJson(task.statePath);
-    const result = {
+    const candidate = {
       ok: true,
       ticketLength: state.captcha?.ticket?.length || 0,
       cookieNames: Object.keys(state.cookies || {}),
       uuid: state.localStorage?.[uniqueUserIdKey] || null,
       deviceId: state.localStorage?.[deviceIdKey] || null,
       statePath: task.statePath,
+      browser: state.browser,
     };
-    await writeJson(path.join(root, "dryrun.json"), result);
-    console.log(JSON.stringify(result));
-    await disposeBrowserContext(cdp, context.browserContextId);
-  } finally {
-    cdp.socket.close();
-  }
+    await closeBrowserContext(cdp, context);
+    return candidate;
+  });
+  await writeJson(path.join(root, "dryrun.json"), result);
+  console.log(JSON.stringify(result));
 }
 
 async function runPanelCheck() {
@@ -688,8 +853,8 @@ async function main() {
   }
   if (!panelKey || !imapUser || !imapPassword) throw new Error("PANEL_KEY, IMAP_USER and IMAP_PASSWORD are required");
   await fs.mkdir(root, { recursive: true });
+  await fs.mkdir(chromeProfileRoot, { recursive: true });
   await panelFetch(`/?k=${encodeURIComponent(panelKey)}&view=providers&edit=minimax-code-global`, {}, false);
-  const cdp = await connectCdpBrowser();
   const existing = await loadExistingResults();
   const results = existing.results;
   let nextIndex = existing.nextIndex;
@@ -699,26 +864,39 @@ async function main() {
   updateProgressState(results, nextIndex);
   await writeSummary(results);
   emitProgress("resume", `已恢复 ${progressState.succeeded}/${targetSuccessCount} 个成功账号，正在继续补齐`);
-  try {
-    while (progressState.succeeded < targetSuccessCount) {
+  while (progressState.succeeded < targetSuccessCount) {
       progressState.current = nextIndex;
       emitProgress("creating-code", `正在创建第 ${nextIndex} 个账号设备码`, { current: nextIndex });
       const task = await createTask(nextIndex);
       nextIndex += 1;
       await initializeTask(task);
       const beforeUsers = (await providerUsers()).users;
-      emitProgress("captcha", `正在为 ${task.email} 预热 reCAPTCHA 票据`, { current: task.index });
+      emitProgress("captcha", `正在为 ${task.email} 创建独立临时 Chrome profile 并预热 reCAPTCHA 票据`, { current: task.index });
       let result;
       try {
-        task.context = await prewarmAccount(cdp, task);
+        await withCdpBrowser(task, async (cdp, browser) => {
+          task.browserProfileDir = browser.profileDir;
+          task.browserCdpPort = browser.port;
+          task.browserChromePid = browser.child.pid;
+          task.context = await createAccountContext(cdp, task);
+          result = await processAccount(task, beforeUsers, (step, message) => emitProgress(step, message, { current: task.index }));
+          await closeBrowserContext(cdp, task.context);
+        });
       } catch (error) {
-        task.prewarmError = error.message;
-        if (!riskControlPattern.test(error.message) && !captchaUnavailablePattern.test(error.message)) {
-          await writeJson(task.resultPath, { ok: false, error: task.prewarmError, email: task.email, userCode: task.userCode, signInId: task.signInId, runDir: task.runDir, completedAt: new Date().toISOString() });
+        if (!result) {
+          task.prewarmError = error.message;
+          result = {
+            index: task.index,
+            ok: false,
+            error: task.prewarmError,
+            riskBlocked: riskControlPattern.test(task.prewarmError),
+            runDir: task.runDir,
+          };
+          if (!riskControlPattern.test(task.prewarmError) && !captchaUnavailablePattern.test(task.prewarmError)) {
+            await writeJson(task.resultPath, { ok: false, error: task.prewarmError, email: task.email, userCode: task.userCode, signInId: task.signInId, runDir: task.runDir, completedAt: new Date().toISOString() });
+          }
         }
       }
-      const reportFlowProgress = (step, message) => emitProgress(step, message, { current: task.index });
-      result = await processAccount(cdp, task, beforeUsers, reportFlowProgress);
       results.push(result);
       updateProgressState(results, nextIndex);
       await writeSummary(results);
@@ -755,14 +933,6 @@ async function main() {
         emitProgress("risk-recovered", "单次探测注册成功，守护进程将恢复完整批次", { current: task.index });
         return;
       }
-    }
-  } finally {
-    if (riskBlocked || captchaUnavailable || riskProbeLimited) {
-      try {
-        await cdp.call("Browser.close");
-      } catch {}
-    }
-    cdp.socket.close();
   }
   if (riskBlocked) {
     process.exitCode = riskExitCode;

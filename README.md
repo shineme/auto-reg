@@ -28,6 +28,7 @@ The GUI stores panel, mail, IMAP, proxy, and batch settings in `%APPDATA%\minima
 - reCAPTCHA Enterprise tickets are generated only by a real Chrome session that loads the provider's own page and executes its official widget with the matching action.
 - `1200063` / `Verification failed, please try again.` triggers a cooldown and a low-frequency probe; it does not attempt to evade risk controls.
 - Closing the desktop window stops the supervisor, detached Node helpers, Chrome/CDP processes, and the local proxy bridge; the supervisor status is marked `stopped` and its lock is removed.
+- Every account gets a fresh, ephemeral Chrome profile and an OS-assigned CDP port; the Chrome process tree and profile directory are removed after that account finishes or fails.
 - Use only panel access, domains, mailboxes, proxies, and accounts you are authorized to operate, and comply with the provider's terms.
 - For bulk operations, prefer an official/authorized API or provider test environment. If rate-limited, reduce frequency, verify one consistent egress/session, or contact the provider.
 
@@ -37,6 +38,7 @@ The GUI stores panel, mail, IMAP, proxy, and batch settings in `%APPDATA%\minima
 Get-ChildItem scripts\*.mjs | ForEach-Object { node --check $_.FullName }
 node scripts/minimax-resume-test.mjs
 node scripts/minimax-risk-cooldown-test.mjs
+node scripts/minimax-profile-lifecycle-test.mjs
 cd app
 gofmt -w .
 go test ./...

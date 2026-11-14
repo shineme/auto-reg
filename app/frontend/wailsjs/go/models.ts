@@ -12,11 +12,9 @@ export namespace main {
 	    imapPassword: string;
 	    proxyUrl: string;
 	    count: number;
-	    prewarmConcurrency: number;
 	    chromePath: string;
 	    outputDir: string;
 	    scriptsDir: string;
-	    cdpPort: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -35,11 +33,9 @@ export namespace main {
 	        this.imapPassword = source["imapPassword"];
 	        this.proxyUrl = source["proxyUrl"];
 	        this.count = source["count"];
-	        this.prewarmConcurrency = source["prewarmConcurrency"];
 	        this.chromePath = source["chromePath"];
 	        this.outputDir = source["outputDir"];
 	        this.scriptsDir = source["scriptsDir"];
-	        this.cdpPort = source["cdpPort"];
 	    }
 	}
 	export class PanelCheckResult {

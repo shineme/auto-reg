@@ -85,21 +85,20 @@ IAB 的 Playwright `evaluate` 是只读隔离作用域，看不到 `window.greca
 
 ## 协议级快速批量
 
-`scripts/minimax-fast-batch.mjs` 是更快的协议优先版本：面板会话、设备码、注册、IMAP 接码、登录、授权、供应商列表校验全部走 HTTP 协议；浏览器只负责产生 reCAPTCHA Enterprise 票据和 Akamai Cookie。与 `run-minimax-batch.ps1` 每账号重启 Chrome 不同，快速版常驻一个 CDP Chrome，逐账号即时生成 `user_code`、创建独立 BrowserContext 预热并提交协议请求。面板会清理较早的 sign-in 记录，因此不要先批量预生成多个活码再排队等待；每个 BrowserContext 独立 Cookie 和 localStorage，用完即销毁。
+`scripts/minimax-fast-batch.mjs` 是更快的协议优先版本：面板会话、设备码、注册、IMAP 接码、登录、授权、供应商列表校验全部走 HTTP 协议；浏览器只负责产生 reCAPTCHA Enterprise 票据和 Akamai Cookie。快速版逐账号即时生成 `user_code`，为每个账号启动一个独立临时 Chrome profile、分配一个空闲 CDP 端口，并创建独立 BrowserContext 预热及提交协议请求。账号结束或发生异常后，`finally` 会关闭 BrowserContext、调用 `Browser.close`、用进程树兜底结束 Chrome，并删除该 profile；`session.json.browser` 记录本次 profile、端口和 PID。面板会清理较早的 sign-in 记录，因此不要先批量预生成多个活码再排队等待。
 
 关键边界：
 
 - 不能纯 Node 伪造票据。MiniMax 会校验 `send_code` action、同一浏览器会话、同一出口 IP、Akamai Cookie 和页面上下文；伪造或跨账号复用票据会返回 `1200063`。
 - 预热页面用 `https://account.minimax.io/unified-login?login_redirect=<encoded /oauth-authorize?user_code=CODE>`，而不是已过期或已授权的 `/oauth-authorize` 页面；后两类页面不会稳定加载 `enterprise.js`。
-- 每个账号仍有自己的活码、票据、Cookie、`uuid`、`deviceIDStr`、邮箱和 `STATE_PATH`；只共享 Chrome 进程与出口 IP。`IMAP_MAILBOX` 必须是 IMAP 文件夹名（通常 `INBOX`），不是收件邮箱地址。
-- `PREWARM_CONCURRENCY` 控制并发预热数量，默认 4；协议提交保持串行，避免设备码 scoped login context 和 magpie sign-in 轮询互相踩踏。
+- 每个账号仍有自己的活码、票据、Cookie、`uuid`、`deviceIDStr`、邮箱、`STATE_PATH`、临时 Chrome profile 和 CDP 端口；只共享出口 IP。`IMAP_MAILBOX` 必须是 IMAP 文件夹名（通常 `INBOX`），不是收件邮箱地址。
+- 协议提交保持串行，避免设备码 scoped login context 和 magpie sign-in 轮询互相踩踏；每次只创建一个浏览器 session。
 
 运行前设置 `PANEL_KEY`、`IMAP_USER`、`IMAP_PASSWORD`；`IMAP_PASSWORD` 使用邮箱 IMAP 授权码。示例：
 
 ```powershell
 . .\scripts\run-minimax-batch.env.example.ps1
 $env:COUNT = "3"
-$env:PREWARM_CONCURRENCY = "3"
 node .\scripts\minimax-fast-batch.mjs
 ```
 
@@ -111,7 +110,7 @@ $env:DRY_RUN_USER_CODE = "TEST-CODE"
 node .\scripts\minimax-fast-batch.mjs
 ```
 
-输出目录是 `artifacts/fast-batch/<BatchId>/`：每个账号有 `session.json`、`run-config.json`、`flow.json`、`signin-verify.json`、`providers.json`、`result.json`；批次汇总在 `summary.json`。首次投产建议 `COUNT=1`，确认 `flow.status=approved`、`signin.state=done`、供应商列表出现新用户后再增大 `COUNT` 和 `PREWARM_CONCURRENCY`。
+输出目录是 `artifacts/fast-batch/<BatchId>/`：每个账号有 `session.json`、`run-config.json`、`flow.json`、`signin-verify.json`、`providers.json`、`result.json`；批次汇总在 `summary.json`。首次投产建议 `COUNT=1`，确认 `flow.status=approved`、`signin.state=done`、供应商列表出现新用户后再增大 `COUNT`。
 
 ## 守护、实时进度与断点续跑
 
@@ -123,7 +122,7 @@ Go/Wails GUI 通过轮询这两个文件更新成功/失败计数、阶段文案
 
 发码返回 `1200063 Verification failed, please try again.` 且 `debugInfo` 为“人机验证未通过”时，请求在邮件发送前已被 MiniMax 拒绝；IMAP 主机、授权码和搜索条件正常也不会有新验证码。批量脚本识别该错误后以退出码 `75` 停止，写 `BATCH_ROOT/BATCH_ID/risk-control.json`，不把这次设备码写入失败台账；守护进程写 `BATCH_ROOT/risk-state.json` 并进入 `risk-cooldown`，状态保持 `running=true`，默认冷却 30 分钟（可用 `MINIMAX_RISK_COOLDOWN_SECONDS` 覆盖），GUI 显示冷却截止时间与探测次数。冷却结束后只运行一次 `MINIMAX_RISK_PROBE=1` 单账号探测：探测成功恢复完整批次，探测仍被拒绝则重新冷却，不会 5 秒密集重启。`MINIMAX_BATCH_SCRIPT` 仅供离线测试注入假子脚本。
 
-代理模式需要先确认 SOCKS5 认证、本地 HTTP CONNECT 桥、`account.minimax.io` 与 Google reCAPTCHA 资源都能从同一出口访问。仅端口/认证成功不代表票据页可用；若代理出口到 `account.minimax.io` 超时，会出现 `reCAPTCHA Enterprise did not become ready`，此时换 IP 只能解决出口可达性或 IP 信誉问题，不能绕过发码阶段的 `1200063` 风控评分。旧 CDP Chrome 若仍指向 GUI 退出后已关闭的本地桥端口，也会产生同样错误；`chrome-gui-profile/proxy-state.json` 记录当前预期代理，代理切换后会先关闭旧 CDP Chrome 再按新参数启动。
+代理模式需要先确认 SOCKS5 认证、本地 HTTP CONNECT 桥、`account.minimax.io` 与 Google reCAPTCHA 资源都能从同一出口访问。仅端口/认证成功不代表票据页可用；若代理出口到 `account.minimax.io` 超时，会出现 `reCAPTCHA Enterprise did not become ready`，此时换 IP 只能解决出口可达性或 IP 信誉问题，不能绕过发码阶段的 `1200063` 风控评分。每个账号启动独立临时 Chrome，切换代理或直连后不会出现旧 CDP Chrome 仍指向已关闭本地桥端口的问题。
 
 紧凑 SOCKS5 代理格式由 Go 代理桥转换成标准 URL，再以本地 HTTP CONNECT 代理供 Node 和 Chrome 使用。2026-11-14 的 200 账号正式批次使用直连：早先紧凑 SOCKS5 出口下前三个账号均因 `reCAPTCHA Enterprise did not become ready` 失败，而直连票据 dry-run 能取得有效票据、Akamai Cookie、`uuid` 和 `deviceId`。
 
@@ -164,7 +163,7 @@ node .\scripts\minimax-fast-batch.mjs
 - 设备码的 scoped login context 失效时，`GET /oauth2/device/authorize` 返回 `400 invalid or expired user_code`；对失效码继续 `POST /oauth2/login` 返回 `1000021 Login failed ... invalid scoped login_redirect: ... user_code not found or expired`。这是时效与作用域问题，不是 IMAP、邮箱域名或 RSA 加密错误。
 - reCAPTCHA 是独立前置条件：票据必须由同一浏览器会话、同一出口 IP、同一 `send_code` action 产生并桥接。IAB 与 Node 无法共享登录会话和 CAPTCHA 票据是工具链/会话隔离问题，不等同于浏览器指纹被封。
 
-因此优先修活码时效、会话状态、正确 `LOGIN_REDIRECT` 与票据桥接，而不是反复更换指纹。保持干净、持久的普通 Chrome profile、同一代理出口 IP，并且每个设备码只开一个登录窗口。
+因此优先修活码时效、会话状态、正确 `LOGIN_REDIRECT` 与票据桥接，而不是反复更换指纹。保持干净的普通 Chrome 会话、同一代理出口 IP，并且每个设备码只开一个登录窗口；程序不为规避风控而伪造指纹或轮换代理。
 
 ## 排障要点
 

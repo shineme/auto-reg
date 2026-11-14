@@ -28,6 +28,7 @@ dist/
 **/chrome-*-profile/
 **/chrome-gui-profile/
 **/chrome-fast-profile/
+**/chrome-profiles/
 *.port
 
 # OS / editor noise

@@ -12,41 +12,37 @@ import (
 )
 
 type Config struct {
-	PanelBase          string `json:"panelBase"`
-	PanelKey           string `json:"panelKey"`
-	MailDomain         string `json:"mailDomain"`
-	MailPrefix         string `json:"mailPrefix"`
-	Mailbox            string `json:"mailbox"`
-	ImapHost           string `json:"imapHost"`
-	ImapPort           int    `json:"imapPort"`
-	ImapUser           string `json:"imapUser"`
-	ImapPassword       string `json:"imapPassword"`
-	ProxyURL           string `json:"proxyUrl"`
-	Count              int    `json:"count"`
-	PrewarmConcurrency int    `json:"prewarmConcurrency"`
-	ChromePath         string `json:"chromePath"`
-	OutputDir          string `json:"outputDir"`
-	ScriptsDir         string `json:"scriptsDir"`
-	CDPPort            int    `json:"cdpPort"`
+	PanelBase    string `json:"panelBase"`
+	PanelKey     string `json:"panelKey"`
+	MailDomain   string `json:"mailDomain"`
+	MailPrefix   string `json:"mailPrefix"`
+	Mailbox      string `json:"mailbox"`
+	ImapHost     string `json:"imapHost"`
+	ImapPort     int    `json:"imapPort"`
+	ImapUser     string `json:"imapUser"`
+	ImapPassword string `json:"imapPassword"`
+	ProxyURL     string `json:"proxyUrl"`
+	Count        int    `json:"count"`
+	ChromePath   string `json:"chromePath"`
+	OutputDir    string `json:"outputDir"`
+	ScriptsDir   string `json:"scriptsDir"`
 }
 
 func DefaultConfig() Config {
 	workspace := detectWorkspace()
 	return Config{
-		PanelBase:          "https://panel.example.com",
-		MailDomain:         "example.com",
-		MailPrefix:         "mm",
-		Mailbox:            "mailbox@example.com",
-		ImapHost:           "imap.example.com",
-		ImapPort:           993,
-		ImapUser:           "mailbox@example.com",
-		ProxyURL:           "",
-		Count:              1,
-		PrewarmConcurrency: 4,
-		ChromePath:         `C:\Program Files\Google\Chrome\Application\chrome.exe`,
-		OutputDir:          filepath.Join(workspace, "artifacts", "gui-batch"),
-		ScriptsDir:         filepath.Join(workspace, "scripts"),
-		CDPPort:            9333,
+		PanelBase:  "https://panel.example.com",
+		MailDomain: "example.com",
+		MailPrefix: "mm",
+		Mailbox:    "mailbox@example.com",
+		ImapHost:   "imap.example.com",
+		ImapPort:   993,
+		ImapUser:   "mailbox@example.com",
+		ProxyURL:   "",
+		Count:      1,
+		ChromePath: `C:\Program Files\Google\Chrome\Application\chrome.exe`,
+		OutputDir:  filepath.Join(workspace, "artifacts", "gui-batch"),
+		ScriptsDir: filepath.Join(workspace, "scripts"),
 	}
 }
 
@@ -114,12 +110,6 @@ func (cfg *Config) applyDefaults() {
 	if cfg.Count <= 0 {
 		cfg.Count = defaults.Count
 	}
-	if cfg.PrewarmConcurrency <= 0 {
-		cfg.PrewarmConcurrency = defaults.PrewarmConcurrency
-	}
-	if cfg.CDPPort == 0 {
-		cfg.CDPPort = defaults.CDPPort
-	}
 	if cfg.ChromePath == "" {
 		cfg.ChromePath = defaults.ChromePath
 	}
@@ -151,14 +141,8 @@ func (cfg Config) Validate() error {
 	if cfg.Count < 1 || cfg.Count > 200 {
 		return errors.New("批量数量必须在 1 到 200 之间")
 	}
-	if cfg.PrewarmConcurrency < 1 || cfg.PrewarmConcurrency > 16 {
-		return errors.New("预热并发必须在 1 到 16 之间")
-	}
 	if cfg.ImapPort < 1 || cfg.ImapPort > 65535 {
 		return errors.New("IMAP 端口无效")
-	}
-	if cfg.CDPPort < 1 || cfg.CDPPort > 65535 {
-		return errors.New("CDP 端口无效")
 	}
 	if _, err := os.Stat(filepath.Join(cfg.ScriptsDir, "minimax-fast-batch.mjs")); err != nil {
 		return fmt.Errorf("找不到 scripts/minimax-fast-batch.mjs：%w", err)
