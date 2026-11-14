@@ -119,7 +119,7 @@ node .\scripts\minimax-fast-batch.mjs
 
 批量脚本向 stdout 输出单行 JSON 进度事件：`type=progress` 覆盖创建设备码、reCAPTCHA 预热、协议注册、IMAP 接码、OAuth 授权、面板绑定和账号完成；`type=account-result` 携带单个账号的公开结果字段。`minimax-flow.mjs` 通过 stderr 输出 `type=flow-progress` 阶段心跳，批量脚本转换为标准进度事件。守护进程把最新事件原子写入 `supervisor.progress.json`，把 PID、心跳、成功数、失败数、自动恢复次数和退出码写入 `supervisor.status.json`。
 
-Go/Wails GUI 以 Windows 分离进程启动守护程序，通过轮询这两个文件更新成功/失败计数、阶段文案、当前账号、恢复次数和守护 PID；GUI 关闭不会结束已经分离运行的守护进程。`supervisor.lock` 保存当前守护 PID，阻止重复启动；陈旧锁会被下一次启动清理。子进程因网络、CDP 或 Node 异常退出时，守护进程等待 5 秒后重启 `minimax-fast-batch.mjs`，复用 `BATCH_ID=resume-200` 和落盘成功记录，直到 `succeeded >= TARGET_SUCCESS_COUNT` 或用户结束守护进程。
+Go/Wails GUI 通过轮询这两个文件更新成功/失败计数、阶段文案、当前账号、恢复次数和守护 PID；守护程序由 Windows Job Object 纳管，关闭窗口会停止守护程序、Node 子进程、Chrome/CDP 和本地代理桥，并把状态标记为 `stopped`、删除 `supervisor.lock`。`supervisor.lock` 保存当前守护 PID，阻止重复启动；陈旧锁会在下一次启动清理。子进程因网络、CDP 或 Node 异常退出时，守护进程等待 5 秒后重启 `minimax-fast-batch.mjs`，复用 `BATCH_ID=resume-200` 和落盘成功记录，直到 `succeeded >= TARGET_SUCCESS_COUNT` 或用户关闭软件/结束守护进程。
 
 发码返回 `1200063 Verification failed, please try again.` 且 `debugInfo` 为“人机验证未通过”时，请求在邮件发送前已被 MiniMax 拒绝；IMAP 主机、授权码和搜索条件正常也不会有新验证码。批量脚本识别该错误后以退出码 `75` 停止，写 `BATCH_ROOT/BATCH_ID/risk-control.json`，不把这次设备码写入失败台账；守护进程写 `BATCH_ROOT/risk-state.json` 并进入 `risk-cooldown`，状态保持 `running=true`，默认冷却 30 分钟（可用 `MINIMAX_RISK_COOLDOWN_SECONDS` 覆盖），GUI 显示冷却截止时间与探测次数。冷却结束后只运行一次 `MINIMAX_RISK_PROBE=1` 单账号探测：探测成功恢复完整批次，探测仍被拒绝则重新冷却，不会 5 秒密集重启。`MINIMAX_BATCH_SCRIPT` 仅供离线测试注入假子脚本。
 
