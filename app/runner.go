@@ -92,12 +92,13 @@ type RunEvent struct {
 }
 
 type runner struct {
-	app       *App
-	mu        sync.Mutex
-	cancel    context.CancelFunc
-	status    RunStatus
-	events    []RunEvent
-	outputDir string
+	app           *App
+	mu            sync.Mutex
+	cancel        context.CancelFunc
+	status        RunStatus
+	events        []RunEvent
+	outputDir     string
+	supervisorPID int
 }
 
 func newRunner(app *App) *runner {
@@ -138,6 +139,9 @@ func (runner *runner) log(level, message string) {
 func (runner *runner) setStatus(status RunStatus) {
 	runner.mu.Lock()
 	runner.status = status
+	if !status.Running {
+		runner.supervisorPID = 0
+	}
 	runner.mu.Unlock()
 	runner.emit(RunEvent{Type: "status", Level: "info", Message: status.Message, Status: &status})
 }
@@ -163,6 +167,7 @@ func (runner *runner) Start(cfg Config, dryRun bool) error {
 			ctx, cancel := context.WithCancel(context.Background())
 			runner.mu.Lock()
 			runner.cancel = cancel
+			runner.supervisorPID = status.PID
 			runner.mu.Unlock()
 			go runner.watchExistingSupervisor(ctx, cfg, status.BatchID, status.PID)
 			return nil
@@ -175,6 +180,7 @@ func (runner *runner) Start(cfg Config, dryRun bool) error {
 		defer func() {
 			runner.mu.Lock()
 			runner.cancel = nil
+			runner.supervisorPID = 0
 			status := runner.status
 			runner.mu.Unlock()
 			runner.emitEvent("run-status", status)
@@ -254,6 +260,9 @@ func (runner *runner) watchExistingSupervisor(ctx context.Context, cfg Config, b
 	defer func() {
 		runner.mu.Lock()
 		runner.cancel = nil
+		if runner.supervisorPID == supervisorPID {
+			runner.supervisorPID = 0
+		}
 		runner.mu.Unlock()
 	}()
 	runner.watchSupervisor(ctx, cfg, batchID, supervisorPID)
@@ -263,6 +272,19 @@ func (runner *runner) Status() RunStatus {
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
 	return runner.status
+}
+
+func (runner *runner) Running() bool {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return runner.status.Running || runner.cancel != nil
+}
+
+func (runner *runner) HasActiveSupervisor() bool {
+	runner.mu.Lock()
+	supervisorPID := runner.supervisorPID
+	runner.mu.Unlock()
+	return supervisorPID > 0 && processAlive(supervisorPID)
 }
 
 func (runner *runner) Events() []RunEvent {
@@ -383,6 +405,7 @@ func (runner *runner) execute(ctx context.Context, cfg Config, dryRun bool) erro
 	status.SupervisorPID = command.Process.Pid
 	status.Message = "守护进程已启动，正在恢复历史成功账号"
 	runner.status = status
+	runner.supervisorPID = command.Process.Pid
 	runner.mu.Unlock()
 	runner.emitEvent("run-status", status)
 	go runner.watchSupervisor(ctx, cfg, batchID, command.Process.Pid)

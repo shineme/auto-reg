@@ -17,7 +17,6 @@ const batchScript = path.resolve(process.env.MINIMAX_BATCH_SCRIPT || path.join(w
 const riskControlPath = path.join(root, "risk-control.json");
 const riskStatePath = path.join(batchRoot, "risk-state.json");
 const riskExitCode = 75;
-const mailDomain = process.env.MAIL_DOMAIN || "";
 const riskControlPattern = /1200063|人机验证未通过|Verification failed, please try again/i;
 const captchaUnavailablePattern = /reCAPTCHA Enterprise did not become ready|reCAPTCHA Enterprise returned no ticket|CDP browser did not become ready|CDP version HTTP|reCAPTCHA 票据环境暂不可用|ECONNRESET|socket connection was closed unexpectedly|The operation was aborted due to timeout|fetch failed/i;
 const pid = process.pid;
@@ -361,14 +360,7 @@ async function main() {
   try {
     let prepared = await prepareResumeBatch();
     await fs.rm(riskStatePath, { force: true });
-    const existingRiskMarker = await readJson(riskControlPath, null);
-    if (existingRiskMarker?.mailDomain && existingRiskMarker.mailDomain !== mailDomain) {
-      await fs.rm(riskControlPath, { force: true });
-    } else if (existingRiskMarker) {
-      const stoppedSummary = await currentSummary();
-      await publishStopped(stoppedSummary, existingRiskMarker.reason || "domain-risk-controlled", riskExitCode, restartCount);
-      return;
-    }
+    await fs.rm(riskControlPath, { force: true });
     await publishStatus({ phase: "resume", running: true, succeeded: prepared.succeeded, failedAttempts: prepared.failures, restartCount, message: `已恢复 ${prepared.succeeded}/${targetSuccessCount} 个成功账号` });
     await publishProgress(progressEvent({ phase: "resume", done: prepared.succeeded, ok: prepared.succeeded, attempts: prepared.succeeded, message: `已恢复 ${prepared.succeeded}/${targetSuccessCount} 个成功账号，正在继续补齐` }));
     while (true) {

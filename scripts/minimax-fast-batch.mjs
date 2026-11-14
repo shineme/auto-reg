@@ -901,16 +901,6 @@ async function main() {
         results.pop();
         updateProgressState(results, nextIndex);
         await writeSummary(results);
-        await writeJson(riskControlPath, {
-          at: new Date().toISOString(),
-          error: result.error,
-          reason: "domain-risk-controlled",
-          mailDomain,
-          email: task.email,
-          userCode: task.userCode,
-          signInId: task.signInId,
-          runDir: task.runDir,
-        });
         emitProgress("domain-blocked", "域名已被风控，任务已停止；请更换邮箱域名后重新开始", { current: task.index });
         process.exitCode = riskExitCode;
         return;
@@ -922,7 +912,6 @@ async function main() {
       }
       emitProgress("account-done", result.ok ? `账号注册成功：${result.user || result.email}` : `账号未成功：${result.error || "未知错误"}`, { current: task.index });
   }
-  await fs.rm(riskControlPath, { force: true });
   const summary = await writeSummary(results, true);
   console.log(JSON.stringify({ type: "summary", summary, summaryPath }));
 }

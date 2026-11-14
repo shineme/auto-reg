@@ -120,7 +120,7 @@ node .\scripts\minimax-fast-batch.mjs
 
 Go/Wails GUI 通过轮询这两个文件更新成功/失败计数、阶段文案、当前账号、恢复次数和守护 PID；守护程序由 Windows Job Object 纳管，关闭窗口会停止守护程序、Node 子进程、Chrome/CDP 和本地代理桥，并把状态标记为 `stopped`、删除 `supervisor.lock`。`supervisor.lock` 保存当前守护 PID，阻止重复启动；陈旧锁会在下一次启动清理。子进程因网络、CDP 或 Node 异常退出时，守护进程等待 5 秒后重启 `minimax-fast-batch.mjs`，复用 `BATCH_ID=resume-200` 和落盘成功记录，直到 `succeeded >= TARGET_SUCCESS_COUNT` 或用户关闭软件/结束守护进程。
 
-发码返回 `1200063 Verification failed, please try again.` 且 `debugInfo` 为“人机验证未通过”时，请求在邮件发送前已被 MiniMax 拒绝；IMAP 主机、授权码和搜索条件正常也不会有新验证码。按运维口径，这表示当前邮箱域名已被风控。批量脚本识别该错误后以退出码 `75` 停止，写 `BATCH_ROOT/BATCH_ID/risk-control.json`（含 `reason=domain-risk-controlled` 和 `mailDomain`），不把这次设备码写入失败台账；守护进程立即写 `domain-blocked`、`running=false`，不冷却、不自动探测、不自动恢复，GUI 提示「域名已被风控，请更换邮箱域名后重新开始」。用户在 GUI 更换 `MAIL_DOMAIN` 并重新开始时，守护进程会删除旧域名留下的风控标记；同一域名重启仍保持停止状态。普通网络或进程异常仍按 5 秒自动恢复。`MINIMAX_BATCH_SCRIPT` 仅供离线测试注入假子脚本。
+发码返回 `1200063 Verification failed, please try again.` 且 `debugInfo` 为“人机验证未通过”时，请求在邮件发送前已被 MiniMax 拒绝；IMAP 主机、授权码和搜索条件正常也不会有新验证码。按运维口径，这表示本次注册尝试被风控拦截。批量脚本识别该错误后以退出码 `75` 停止，守护进程立即写 `domain-blocked`、`running=false`，不冷却、不自动探测、不自动恢复，GUI 提示「域名已被风控，任务已停止」。风控判定只作用于本次运行；守护进程启动时删除 `risk-state.json` 和各批次的旧 `risk-control.json`，GUI 也提供「清理风控状态」与「清空历史记录」两个本机操作。前者只清理风险与守护状态并保留成功账号，后者额外删除本机输出目录里的历史账号目录、汇总和台账；两者都不会删除已经绑定到面板的账号。普通网络或进程异常仍按 5 秒自动恢复。`MINIMAX_BATCH_SCRIPT` 仅供离线测试注入假子脚本。
 
 代理模式需要先确认 SOCKS5 认证、本地 HTTP CONNECT 桥、`account.minimax.io` 与 Google reCAPTCHA 资源都能从同一出口访问。仅端口/认证成功不代表票据页可用；若代理出口到 `account.minimax.io` 超时，会出现 `reCAPTCHA Enterprise did not become ready`，此时换 IP 只能解决出口可达性或 IP 信誉问题，不能绕过发码阶段的 `1200063` 风控评分。每个账号启动独立临时 Chrome，切换代理或直连后不会出现旧 CDP Chrome 仍指向已关闭本地桥端口的问题。
 

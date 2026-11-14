@@ -220,6 +220,22 @@ async function testPanel() {
   finally { button.disabled = false; }
 }
 
+async function clearRunState(includeHistory) {
+  if (!go) return;
+  const question = includeHistory
+    ? "将删除本机输出目录中的历史账号结果、汇总、风控和守护状态；真实面板账号不会被删除。确认继续？"
+    : "将删除本机风控标记、守护状态和冷却状态；已成功账号记录会保留。确认继续？";
+  if (!window.confirm(question)) return;
+  try {
+    const result = await go.ClearRunState(includeHistory);
+    toast(includeHistory ? "历史记录已清空，可以重新开始" : "风控状态已清理，可以重新点击开始", "success");
+    liveResults.clear();
+    renderResults([]);
+    renderStatus(await go.GetRunStatus());
+    if (result?.includeHistory) await refreshResults();
+  } catch (error) { toast(`清理失败：${error.message || error}`, "error"); }
+}
+
 async function init() {
   if (!go) {
     toast("Wails 绑定未就绪，请用 wails dev 或打包后的程序启动。", "error");
@@ -233,6 +249,8 @@ async function init() {
   element("dry-run").addEventListener("click", () => startRun(true));
   element("start-run").addEventListener("click", () => startRun(false));
   element("stop-run").addEventListener("click", () => go.StopRun());
+  element("clear-state").addEventListener("click", () => clearRunState(false));
+  element("clear-history").addEventListener("click", () => clearRunState(true));
   element("refresh-results").addEventListener("click", refreshResults);
   element("check-runtime").addEventListener("click", checkRuntime);
   element("open-output").addEventListener("click", async () => {

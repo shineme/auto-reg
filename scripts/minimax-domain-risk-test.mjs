@@ -13,7 +13,6 @@ const batchScript = path.join(testRoot, "fake-batch.mjs");
 const statusPath = path.join(testRoot, "supervisor.status.json");
 const progressPath = path.join(testRoot, "supervisor.progress.json");
 const summaryPath = path.join(testRoot, batchId, "summary.json");
-const riskStatePath = path.join(testRoot, "risk-state.json");
 const riskControlPath = path.join(testRoot, batchId, "risk-control.json");
 const counterPath = path.join(testRoot, "child-count.txt");
 
@@ -55,11 +54,8 @@ async function main() {
   await fs.writeFile(batchScript, `
 import fs from "node:fs/promises";
 const counterPath = ${JSON.stringify(counterPath)};
-const riskControlPath = ${JSON.stringify(riskControlPath)};
 const count = Number(await fs.readFile(counterPath, "utf8").catch(() => "0")) + 1;
 await fs.writeFile(counterPath, String(count));
-await fs.mkdir(${JSON.stringify(path.join(testRoot, batchId))}, { recursive: true });
-await fs.writeFile(riskControlPath, JSON.stringify({ at: new Date().toISOString(), reason: "domain-risk-controlled", mailDomain: "blocked.example.test", error: "1200063" }, null, 2));
 console.error("send-code: 1200063 Verification failed, please try again.");
 process.exitCode = 75;
 `, "utf8");
@@ -69,7 +65,6 @@ process.exitCode = 75;
     BATCH_ID: batchId,
     COUNT: "2",
     TARGET_SUCCESS_COUNT: "2",
-    MAIL_DOMAIN: "fresh.example.test",
     MINIMAX_BATCH_SCRIPT: batchScript,
     NODE_NO_WARNINGS: "1",
   };
@@ -87,17 +82,16 @@ process.exitCode = 75;
   assert.equal(progress.phase, "domain-blocked");
   assert.equal(summary.succeeded, 1);
   assert.equal(await childCount(), 1);
-  assert.equal(await fs.stat(riskStatePath).then(() => true, () => false), false);
   assert.equal(await fs.stat(path.join(testRoot, "supervisor.lock")).then(() => true, () => false), false);
 
-  const beforeRestart = await childCount();
   await writeJson(riskControlPath, { at: new Date().toISOString(), reason: "domain-risk-controlled", mailDomain: "fresh.example.test", error: "1200063" });
-  const resumed = spawn(process.execPath, [supervisor], { cwd: workspace, env, stdio: "ignore" });
+  const restarted = spawn(process.execPath, [supervisor], { cwd: workspace, env, stdio: "ignore" });
   await waitFor(async () => (await readJson(statusPath, {}))?.phase === "domain-blocked", 15000);
-  await new Promise((resolve) => resumed.once("exit", resolve));
-  assert.equal(await childCount(), beforeRestart);
+  await new Promise((resolve) => restarted.once("exit", resolve));
+  assert.equal(await childCount(), 2);
   assert.equal((await readJson(statusPath, {})).running, false);
-  console.log(JSON.stringify({ ok: true, phase: status.phase, childRuns: 1, oldRiskStateRemoved: true, restartCount: status.restartCount }));
+  assert.equal(await fs.stat(riskControlPath).then(() => true, () => false), false);
+  console.log(JSON.stringify({ ok: true, phase: status.phase, childRuns: 2, staleMarkerIgnored: true, restartCount: status.restartCount }));
   await fs.rm(testRoot, { recursive: true, force: true });
 }
 

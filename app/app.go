@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -35,6 +36,9 @@ func (app *App) startup(ctx context.Context) {
 	if err == nil {
 		if status, statusErr := readSupervisorStatus(cfg.OutputDir); statusErr == nil && status.Running && processAlive(status.PID) {
 			_ = app.runner.Start(cfg, false)
+		}
+		if status, statusErr := readSupervisorStatus(cfg.OutputDir); statusErr == nil && !status.Running && status.Phase == "domain-blocked" {
+			_, _ = clearRunState(cfg.OutputDir, false)
 		}
 	}
 	if os.Getenv("MINIMAX_AUTOSTART") == "1" {
@@ -75,6 +79,74 @@ func (app *App) StartRun(config Config, dryRun bool) error {
 
 func (app *App) StopRun() {
 	app.runner.Stop()
+}
+
+func (app *App) ClearRunState(includeHistory bool) (map[string]interface{}, error) {
+	if app.runner.Running() || app.runner.HasActiveSupervisor() {
+		return nil, errors.New("请先停止当前任务，再清理运行记录")
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	result, err := clearRunState(cfg.OutputDir, includeHistory)
+	if err != nil {
+		return nil, err
+	}
+	app.runner.setStatus(RunStatus{Running: false, Phase: "idle", Message: "运行记录已清理，可以重新开始", Count: cfg.Count})
+	return result, nil
+}
+
+func clearRunState(outputDir string, includeHistory bool) (map[string]interface{}, error) {
+	removed := make([]string, 0)
+	paths := []string{
+		filepath.Join(outputDir, "risk-state.json"),
+		filepath.Join(outputDir, "supervisor.status.json"),
+		filepath.Join(outputDir, "supervisor.progress.json"),
+		filepath.Join(outputDir, "supervisor.lock"),
+	}
+	entries, err := os.ReadDir(outputDir)
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			paths = append(paths, filepath.Join(outputDir, entry.Name(), "risk-control.json"))
+			if includeHistory {
+				paths = append(paths,
+					filepath.Join(outputDir, entry.Name(), "summary.json"),
+					filepath.Join(outputDir, entry.Name(), "dryrun.json"),
+					filepath.Join(outputDir, entry.Name(), "dryrun-session.json"),
+				)
+				accountEntries, accountErr := os.ReadDir(filepath.Join(outputDir, entry.Name()))
+				if accountErr != nil {
+					continue
+				}
+				for _, accountEntry := range accountEntries {
+					if accountEntry.IsDir() && strings.HasPrefix(accountEntry.Name(), "account-") {
+						paths = append(paths, filepath.Join(outputDir, entry.Name(), accountEntry.Name()))
+					}
+				}
+			}
+		}
+	}
+	if includeHistory {
+		paths = append(paths, filepath.Join(outputDir, "resume-ledger.json"))
+	}
+	for _, stateFile := range paths {
+		if err := os.RemoveAll(stateFile); err != nil {
+			return nil, err
+		}
+		if _, err := os.Lstat(stateFile); errors.Is(err, os.ErrNotExist) {
+			removed = append(removed, stateFile)
+		}
+	}
+	return map[string]interface{}{
+		"ok":             true,
+		"includeHistory": includeHistory,
+		"cleared":        removed,
+		"outputDir":      outputDir,
+	}, nil
 }
 
 func (app *App) GetRunStatus() RunStatus {
