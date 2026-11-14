@@ -20,20 +20,18 @@ import (
 )
 
 type RunStatus struct {
-	Running           bool   `json:"running"`
-	Phase             string `json:"phase"`
-	Message           string `json:"message"`
-	Count             int    `json:"count"`
-	Done              int    `json:"done"`
-	OK                int    `json:"ok"`
-	Failed            int    `json:"failed"`
-	Attempts          int    `json:"attempts"`
-	Current           int    `json:"current"`
-	RestartCount      int    `json:"restartCount"`
-	RiskProbeCount    int    `json:"riskProbeCount"`
-	RiskCooldownUntil string `json:"riskCooldownUntil"`
-	BatchID           string `json:"batchId"`
-	SupervisorPID     int    `json:"supervisorPid"`
+	Running       bool   `json:"running"`
+	Phase         string `json:"phase"`
+	Message       string `json:"message"`
+	Count         int    `json:"count"`
+	Done          int    `json:"done"`
+	OK            int    `json:"ok"`
+	Failed        int    `json:"failed"`
+	Attempts      int    `json:"attempts"`
+	Current       int    `json:"current"`
+	RestartCount  int    `json:"restartCount"`
+	BatchID       string `json:"batchId"`
+	SupervisorPID int    `json:"supervisorPid"`
 }
 
 type ProgressEvent struct {
@@ -48,8 +46,6 @@ type ProgressEvent struct {
 	Attempts            int     `json:"attempts"`
 	Current             int     `json:"current"`
 	RestartCount        int     `json:"restartCount"`
-	RiskProbeCount      int     `json:"riskProbeCount"`
-	RiskCooldownUntil   string  `json:"riskCooldownUntil"`
 	Result              *Result `json:"result,omitempty"`
 	UpdatedAt           string  `json:"updatedAt"`
 	EventID             string  `json:"eventId"`
@@ -58,22 +54,20 @@ type ProgressEvent struct {
 }
 
 type SupervisorStatus struct {
-	PID               int    `json:"pid"`
-	BatchID           string `json:"batchId"`
-	TargetSuccess     int    `json:"targetSuccessCount"`
-	StartedAt         string `json:"startedAt"`
-	HeartbeatAt       string `json:"heartbeatAt"`
-	Phase             string `json:"phase"`
-	Running           bool   `json:"running"`
-	Succeeded         int    `json:"succeeded"`
-	Failed            int    `json:"failed"`
-	FailedAttempts    int    `json:"failedAttempts"`
-	RestartCount      int    `json:"restartCount"`
-	RiskProbeCount    int    `json:"riskProbeCount"`
-	RiskCooldownUntil string `json:"riskCooldownUntil"`
-	LastExitCode      int    `json:"lastExitCode"`
-	Message           string `json:"message"`
-	Error             string `json:"error"`
+	PID            int    `json:"pid"`
+	BatchID        string `json:"batchId"`
+	TargetSuccess  int    `json:"targetSuccessCount"`
+	StartedAt      string `json:"startedAt"`
+	HeartbeatAt    string `json:"heartbeatAt"`
+	Phase          string `json:"phase"`
+	Running        bool   `json:"running"`
+	Succeeded      int    `json:"succeeded"`
+	Failed         int    `json:"failed"`
+	FailedAttempts int    `json:"failedAttempts"`
+	RestartCount   int    `json:"restartCount"`
+	LastExitCode   int    `json:"lastExitCode"`
+	Message        string `json:"message"`
+	Error          string `json:"error"`
 }
 
 type Result struct {
@@ -496,19 +490,17 @@ func (runner *runner) watchSupervisor(ctx context.Context, cfg Config, batchID s
 			}
 			if eventErr != nil {
 				runner.updateStatus(RunStatus{
-					Running:           status.Running,
-					Phase:             status.Phase,
-					Message:           status.Message,
-					Count:             cfg.Count,
-					Done:              summary.Succeeded,
-					OK:                summary.Succeeded,
-					Failed:            summary.Failed,
-					Attempts:          summary.Attempts,
-					RestartCount:      status.RestartCount,
-					RiskProbeCount:    status.RiskProbeCount,
-					RiskCooldownUntil: status.RiskCooldownUntil,
-					BatchID:           batchID,
-					SupervisorPID:     supervisorPID,
+					Running:       status.Running,
+					Phase:         status.Phase,
+					Message:       status.Message,
+					Count:         cfg.Count,
+					Done:          summary.Succeeded,
+					OK:            summary.Succeeded,
+					Failed:        summary.Failed,
+					Attempts:      summary.Attempts,
+					RestartCount:  status.RestartCount,
+					BatchID:       batchID,
+					SupervisorPID: supervisorPID,
 				})
 			}
 			if !status.Running || summary.FinishedAt != "" {
@@ -532,8 +524,6 @@ func (runner *runner) applyProgressEvent(event ProgressEvent, count int, supervi
 	status.Attempts = event.Attempts
 	status.Current = event.Current
 	status.RestartCount = event.RestartCount
-	status.RiskProbeCount = event.RiskProbeCount
-	status.RiskCooldownUntil = event.RiskCooldownUntil
 	status.BatchID = event.BatchID
 	if status.BatchID == "" {
 		status.BatchID = "resume-200"
@@ -608,8 +598,6 @@ func (runner *runner) handleProgressLine(line string, cfg Config, dryRun bool) b
 	status.Attempts = event.Attempts
 	status.Current = event.Current
 	status.RestartCount = event.RestartCount
-	status.RiskProbeCount = event.RiskProbeCount
-	status.RiskCooldownUntil = event.RiskCooldownUntil
 	status.BatchID = event.BatchID
 	if event.BatchID == "" {
 		status.BatchID = "resume-200"

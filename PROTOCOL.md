@@ -1,6 +1,6 @@
 # MiniMax Code (Global) 邮箱注册与设备码授权协议
 
-> 公开源码说明：本文已用占位符替换真实面板、邮箱、代理、账号与协议常量。`MINIMAX_SIGNATURE_SALT`、`MINIMAX_YY_SUFFIX`、`MINIMAX_RECAPTCHA_SITE_KEY` 等站点参数只从本地环境读取，不随仓库发布。项目不实现 reCAPTCHA/风控绕过、票据伪造、指纹伪装或用于规避的代理轮换；票据只由加载供应商页面的真实浏览器会话生成。遇到 `1200063` 时采取冷却与低频探测，并优先使用官方/授权 API 或供应商测试环境。
+> 公开源码说明：本文已用占位符替换真实面板、邮箱、代理、账号与协议常量。`MINIMAX_SIGNATURE_SALT`、`MINIMAX_YY_SUFFIX`、`MINIMAX_RECAPTCHA_SITE_KEY` 等站点参数只从本地环境读取，不随仓库发布。项目不实现 reCAPTCHA/风控绕过、票据伪造、指纹伪装或用于规避的代理轮换；票据只由加载供应商页面的真实浏览器会话生成。遇到 `1200063` 时视为邮箱域名已被风控，立即停止并提示更换域名，优先使用官方/授权 API 或供应商测试环境。
 
 ## 结论与最终成功记录
 
@@ -120,7 +120,7 @@ node .\scripts\minimax-fast-batch.mjs
 
 Go/Wails GUI 通过轮询这两个文件更新成功/失败计数、阶段文案、当前账号、恢复次数和守护 PID；守护程序由 Windows Job Object 纳管，关闭窗口会停止守护程序、Node 子进程、Chrome/CDP 和本地代理桥，并把状态标记为 `stopped`、删除 `supervisor.lock`。`supervisor.lock` 保存当前守护 PID，阻止重复启动；陈旧锁会在下一次启动清理。子进程因网络、CDP 或 Node 异常退出时，守护进程等待 5 秒后重启 `minimax-fast-batch.mjs`，复用 `BATCH_ID=resume-200` 和落盘成功记录，直到 `succeeded >= TARGET_SUCCESS_COUNT` 或用户关闭软件/结束守护进程。
 
-发码返回 `1200063 Verification failed, please try again.` 且 `debugInfo` 为“人机验证未通过”时，请求在邮件发送前已被 MiniMax 拒绝；IMAP 主机、授权码和搜索条件正常也不会有新验证码。批量脚本识别该错误后以退出码 `75` 停止，写 `BATCH_ROOT/BATCH_ID/risk-control.json`，不把这次设备码写入失败台账；守护进程写 `BATCH_ROOT/risk-state.json` 并进入 `risk-cooldown`，状态保持 `running=true`，默认冷却 30 分钟（可用 `MINIMAX_RISK_COOLDOWN_SECONDS` 覆盖），GUI 显示冷却截止时间与探测次数。冷却结束后只运行一次 `MINIMAX_RISK_PROBE=1` 单账号探测：探测成功恢复完整批次，探测仍被拒绝则重新冷却，不会 5 秒密集重启。`MINIMAX_BATCH_SCRIPT` 仅供离线测试注入假子脚本。
+发码返回 `1200063 Verification failed, please try again.` 且 `debugInfo` 为“人机验证未通过”时，请求在邮件发送前已被 MiniMax 拒绝；IMAP 主机、授权码和搜索条件正常也不会有新验证码。按运维口径，这表示当前邮箱域名已被风控。批量脚本识别该错误后以退出码 `75` 停止，写 `BATCH_ROOT/BATCH_ID/risk-control.json`（含 `reason=domain-risk-controlled` 和 `mailDomain`），不把这次设备码写入失败台账；守护进程立即写 `domain-blocked`、`running=false`，不冷却、不自动探测、不自动恢复，GUI 提示「域名已被风控，请更换邮箱域名后重新开始」。用户在 GUI 更换 `MAIL_DOMAIN` 并重新开始时，守护进程会删除旧域名留下的风控标记；同一域名重启仍保持停止状态。普通网络或进程异常仍按 5 秒自动恢复。`MINIMAX_BATCH_SCRIPT` 仅供离线测试注入假子脚本。
 
 代理模式需要先确认 SOCKS5 认证、本地 HTTP CONNECT 桥、`account.minimax.io` 与 Google reCAPTCHA 资源都能从同一出口访问。仅端口/认证成功不代表票据页可用；若代理出口到 `account.minimax.io` 超时，会出现 `reCAPTCHA Enterprise did not become ready`，此时换 IP 只能解决出口可达性或 IP 信誉问题，不能绕过发码阶段的 `1200063` 风控评分。每个账号启动独立临时 Chrome，切换代理或直连后不会出现旧 CDP Chrome 仍指向已关闭本地桥端口的问题。
 
@@ -175,4 +175,4 @@ node .\scripts\minimax-fast-batch.mjs
 - 面板返回 `401 ... browser sent no sign-in cookie` 时，优先检查登录页 303 的 `Set-Cookie` 是否被保存并用于下一次重定向请求；这不是浏览器指纹或 Cookie 被别的端口服务清掉的首要证据。每主机共享 Cookie，同源不同端口的服务确实能清掉站点数据，但协议客户端自己的 Cookie Jar 问题应先排除。
 - 配置了上游代理时，本地代理桥会设置 `NODE_USE_ENV_PROXY=1`、`HTTP(S)_PROXY`、`ALL_PROXY` 和 `MINIMAX_PROXY_URL`，让 Node 面板请求、MiniMax 协议请求与 CDP Chrome 共用同一出口；`NO_PROXY` 保留 `localhost/127.0.0.1/::1`，避免本机 CDP 控制请求也被代理。代理留空时禁用 Node 环境代理，Chrome 也不附加 `--proxy-server`。
 - GUI 接受 `socks5://user:pass@host:port`、`http://user:pass@host:port`、缺少 `@` 的 `scheme://user:pass:host:port`，以及 Markdown 转义后的 `http\://...`；规范化后统一转成本地 HTTP CONNECT 桥。
-- 遇到 `1200063` 或票据环境不可用时，使用冷却和低频单账号探测；不要伪造票据、复用跨账号票据、批量轮换出口 IP 或规避风控。恢复失败时联系供应商或使用授权 API/测试环境。
+- 遇到 `1200063` 时视为当前邮箱域名被风控，立即停止并在授权范围内更换域名；不要伪造票据、复用跨账号票据、批量轮换出口 IP 或规避风控。票据环境不可用时也立即停止并检查出口或代理；恢复失败时联系供应商或使用授权 API/测试环境。

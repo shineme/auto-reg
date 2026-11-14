@@ -101,8 +101,6 @@ export namespace main {
 	    attempts: number;
 	    current: number;
 	    restartCount: number;
-	    riskProbeCount: number;
-	    riskCooldownUntil: string;
 	    batchId: string;
 	    supervisorPid: number;
 	
@@ -122,8 +120,6 @@ export namespace main {
 	        this.attempts = source["attempts"];
 	        this.current = source["current"];
 	        this.restartCount = source["restartCount"];
-	        this.riskProbeCount = source["riskProbeCount"];
-	        this.riskCooldownUntil = source["riskCooldownUntil"];
 	        this.batchId = source["batchId"];
 	        this.supervisorPid = source["supervisorPid"];
 	    }

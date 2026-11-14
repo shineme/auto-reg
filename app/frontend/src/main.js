@@ -110,8 +110,6 @@ function renderStatus(status) {
   const details = [`成功 ${ok}`, `失败 ${failed}`, `尝试 ${status.attempts || 0}`];
   if (status.current) details.push(`当前第 ${status.current} 个`);
   if (status.restartCount) details.push(`自动恢复 ${status.restartCount} 次`);
-  if (status.riskProbeCount) details.push(`风控探测 ${status.riskProbeCount} 次`);
-  if (status.riskCooldownUntil) details.push(`冷却至 ${new Date(status.riskCooldownUntil).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })}`);
   if (status.batchId) details.push(`批次 ${status.batchId}`);
   if (status.supervisorPid) details.push(`守护进程 ${status.supervisorPid}`);
   element("progress-detail").textContent = details.join(" · ");

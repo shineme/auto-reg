@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const testRoot = path.join(workspace, "artifacts", `risk-unit-${crypto.randomBytes(4).toString("hex")}`);
+const testRoot = path.join(workspace, "artifacts", `domain-risk-unit-${crypto.randomBytes(4).toString("hex")}`);
 const batchId = "risk-unit";
 const supervisor = path.join(workspace, "scripts", "minimax-supervisor.mjs");
 const batchScript = path.join(testRoot, "fake-batch.mjs");
@@ -14,6 +14,7 @@ const statusPath = path.join(testRoot, "supervisor.status.json");
 const progressPath = path.join(testRoot, "supervisor.progress.json");
 const summaryPath = path.join(testRoot, batchId, "summary.json");
 const riskStatePath = path.join(testRoot, "risk-state.json");
+const riskControlPath = path.join(testRoot, batchId, "risk-control.json");
 const counterPath = path.join(testRoot, "child-count.txt");
 
 async function writeJson(filePath, value) {
@@ -54,20 +55,13 @@ async function main() {
   await fs.writeFile(batchScript, `
 import fs from "node:fs/promises";
 const counterPath = ${JSON.stringify(counterPath)};
+const riskControlPath = ${JSON.stringify(riskControlPath)};
 const count = Number(await fs.readFile(counterPath, "utf8").catch(() => "0")) + 1;
 await fs.writeFile(counterPath, String(count));
-if (count === 1) {
-  console.error("send-code: 1200063 Verification failed, please try again.");
-  process.exitCode = 75;
-} else if (count === 2) {
-  console.log(JSON.stringify({ type: "progress", phase: "risk-recovered", message: "单次探测注册成功", done: 1, ok: 1, failed: 0, attempts: 1, current: 0, updatedAt: new Date().toISOString() }));
-  await fs.mkdir(${JSON.stringify(path.join(testRoot, batchId, "account-002"))}, { recursive: true });
-  await fs.writeFile(${JSON.stringify(path.join(testRoot, batchId, "account-002", "result.json"))}, JSON.stringify({ ok: true, email: "recovered@example.test", user: "MiniMax100002", runDir: ${JSON.stringify(path.join(testRoot, batchId, "account-002"))} }));
-  process.exitCode = 0;
-} else {
-  console.error(JSON.stringify({ ok: false, error: "unexpected fake child invocation" }));
-  process.exitCode = 1;
-}
+await fs.mkdir(${JSON.stringify(path.join(testRoot, batchId))}, { recursive: true });
+await fs.writeFile(riskControlPath, JSON.stringify({ at: new Date().toISOString(), reason: "domain-risk-controlled", mailDomain: "blocked.example.test", error: "1200063" }, null, 2));
+console.error("send-code: 1200063 Verification failed, please try again.");
+process.exitCode = 75;
 `, "utf8");
   const env = {
     ...process.env,
@@ -75,38 +69,35 @@ if (count === 1) {
     BATCH_ID: batchId,
     COUNT: "2",
     TARGET_SUCCESS_COUNT: "2",
+    MAIL_DOMAIN: "fresh.example.test",
     MINIMAX_BATCH_SCRIPT: batchScript,
-    MINIMAX_RISK_COOLDOWN_SECONDS: "2",
     NODE_NO_WARNINGS: "1",
   };
   const child = spawn(process.execPath, [supervisor], { cwd: workspace, env, stdio: "ignore" });
-  await waitFor(async () => (await readJson(statusPath, {}))?.phase === "risk-cooldown");
-  const cooldownStatus = await readJson(statusPath, {});
-  assert.equal(cooldownStatus.running, true);
-  assert.equal(cooldownStatus.lastExitCode, 75);
-  assert.equal(cooldownStatus.succeeded, 1);
-  assert.ok(cooldownStatus.riskCooldownUntil);
-  assert.match(cooldownStatus.message, /冷却至/);
-  const cooldownProgress = await readJson(progressPath, {});
-  assert.equal(cooldownProgress.phase, "risk-cooldown");
-  assert.equal(cooldownProgress.done, 1);
-  const riskState = await readJson(riskStatePath, {});
-  assert.equal(riskState.active, true);
-  assert.equal(await childCount(), 1);
-  await waitFor(async () => (await readJson(statusPath, {}))?.phase === "done", 20000);
+  await waitFor(async () => (await readJson(statusPath, {}))?.phase === "domain-blocked", 15000);
   await new Promise((resolve) => child.once("exit", resolve));
-  const doneStatus = await readJson(statusPath, {});
+  const status = await readJson(statusPath, {});
+  const progress = await readJson(progressPath, {});
   const summary = await readJson(summaryPath, {});
-  const ledger = await readJson(path.join(testRoot, "resume-ledger.json"), {});
-  assert.equal(doneStatus.running, false);
-  assert.equal(doneStatus.succeeded, 2);
-  assert.equal(doneStatus.restartCount, 0);
-  assert.equal(summary.succeeded, 2);
-  assert.equal(summary.finishedAt ? "finished" : "unfinished", "finished");
-  assert.equal(ledger.succeeded, 2);
-  assert.equal(await childCount(), 2);
+  assert.equal(status.running, false);
+  assert.equal(status.lastExitCode, 75);
+  assert.equal(status.succeeded, 1);
+  assert.equal(status.restartCount, 0);
+  assert.match(status.message, /域名已被风控/);
+  assert.equal(progress.phase, "domain-blocked");
+  assert.equal(summary.succeeded, 1);
+  assert.equal(await childCount(), 1);
+  assert.equal(await fs.stat(riskStatePath).then(() => true, () => false), false);
   assert.equal(await fs.stat(path.join(testRoot, "supervisor.lock")).then(() => true, () => false), false);
-  console.log(JSON.stringify({ ok: true, testRoot, cooldownPhase: cooldownStatus.phase, probes: await childCount(), succeeded: summary.succeeded }));
+
+  const beforeRestart = await childCount();
+  await writeJson(riskControlPath, { at: new Date().toISOString(), reason: "domain-risk-controlled", mailDomain: "fresh.example.test", error: "1200063" });
+  const resumed = spawn(process.execPath, [supervisor], { cwd: workspace, env, stdio: "ignore" });
+  await waitFor(async () => (await readJson(statusPath, {}))?.phase === "domain-blocked", 15000);
+  await new Promise((resolve) => resumed.once("exit", resolve));
+  assert.equal(await childCount(), beforeRestart);
+  assert.equal((await readJson(statusPath, {})).running, false);
+  console.log(JSON.stringify({ ok: true, phase: status.phase, childRuns: 1, oldRiskStateRemoved: true, restartCount: status.restartCount }));
   await fs.rm(testRoot, { recursive: true, force: true });
 }
 

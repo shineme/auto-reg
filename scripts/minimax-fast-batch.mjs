@@ -32,7 +32,6 @@ const captchaPrewarmUrl = process.env.CAPTCHA_PREWARM_URL || "https://account.mi
 const riskControlPattern = /1200063|人机验证未通过|Verification failed, please try again/i;
 const riskExitCode = 75;
 const captchaUnavailablePattern = /reCAPTCHA Enterprise did not become ready|reCAPTCHA Enterprise returned no ticket|CDP browser did not become ready|CDP version HTTP|ECONNRESET|socket connection was closed unexpectedly|The operation was aborted due to timeout|fetch failed/i;
-const riskProbe = process.env.MINIMAX_RISK_PROBE === "1";
 const riskControlPath = path.join(root, "risk-control.json");
 const siteKey = process.env.MINIMAX_RECAPTCHA_SITE_KEY || "";
 const captchaAction = "send_code";
@@ -858,9 +857,6 @@ async function main() {
   const existing = await loadExistingResults();
   const results = existing.results;
   let nextIndex = existing.nextIndex;
-  let riskBlocked = false;
-  let captchaUnavailable = false;
-  let riskProbeLimited = false;
   updateProgressState(results, nextIndex);
   await writeSummary(results);
   emitProgress("resume", `已恢复 ${progressState.succeeded}/${targetSuccessCount} 个成功账号，正在继续补齐`);
@@ -902,69 +898,37 @@ async function main() {
       await writeSummary(results);
       emitAccountResult(result);
       if (result.riskBlocked) {
-        riskBlocked = true;
         results.pop();
         updateProgressState(results, nextIndex);
         await writeSummary(results);
         await writeJson(riskControlPath, {
           at: new Date().toISOString(),
           error: result.error,
+          reason: "domain-risk-controlled",
+          mailDomain,
           email: task.email,
           userCode: task.userCode,
           signInId: task.signInId,
           runDir: task.runDir,
         });
-        emitProgress("risk-cooldown", "MiniMax 人机验证未通过，本轮已停止，等待风控冷却后自动探测", { current: task.index });
+        emitProgress("domain-blocked", "域名已被风控，任务已停止；请更换邮箱域名后重新开始", { current: task.index });
+        process.exitCode = riskExitCode;
         return;
       }
       if (captchaUnavailablePattern.test(result.error || "")) {
-        captchaUnavailable = true;
-        emitProgress("risk-cooldown", "reCAPTCHA 票据环境暂不可用，本轮已停止，等待冷却后自动探测", { current: task.index });
-        return;
-      }
-      if (riskProbe && !result.ok) {
-        riskProbeLimited = true;
-        emitProgress("risk-cooldown", "单次探测未恢复注册，等待下一轮低频探测", { current: task.index });
+        emitProgress("environment-unavailable", "reCAPTCHA 票据环境暂不可用，本轮已停止；请检查出口或代理", { current: task.index });
+        process.exitCode = 1;
         return;
       }
       emitProgress("account-done", result.ok ? `账号注册成功：${result.user || result.email}` : `账号未成功：${result.error || "未知错误"}`, { current: task.index });
-      if (riskProbe && result.ok) {
-        riskProbeLimited = true;
-        emitProgress("risk-recovered", "单次探测注册成功，守护进程将恢复完整批次", { current: task.index });
-        return;
-      }
-  }
-  if (riskBlocked) {
-    process.exitCode = riskExitCode;
-    return;
-  }
-  if (captchaUnavailable) {
-    await writeJson(riskControlPath, {
-      at: new Date().toISOString(),
-      error: "reCAPTCHA 票据环境暂不可用",
-      runDir: root,
-      captchaUnavailable: true,
-    });
-    process.exitCode = riskExitCode;
-    return;
-  }
-  if (riskProbeLimited) {
-    if (riskProbe) await fs.rm(riskControlPath, { force: true });
-    if (riskProbe) process.exitCode = 0;
-    else process.exitCode = 1;
-    return;
   }
   await fs.rm(riskControlPath, { force: true });
-  if (riskProbe) {
-    process.exitCode = 0;
-    return;
-  }
   const summary = await writeSummary(results, true);
   console.log(JSON.stringify({ type: "summary", summary, summaryPath }));
 }
 
 main().catch((error) => {
-  if (riskControlPattern.test(error.message) || captchaUnavailablePattern.test(error.message)) process.exitCode = riskExitCode;
+  if (riskControlPattern.test(error.message)) process.exitCode = riskExitCode;
   else process.exitCode = 1;
   console.error(JSON.stringify({ ok: false, error: error.message }));
 });
