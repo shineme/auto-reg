@@ -26,7 +26,7 @@ The GUI stores panel, mail, IMAP, proxy, and batch settings in `%APPDATA%\minima
 
 - No reCAPTCHA or risk-control bypass, token forging, CAPTCHA solving, fingerprint spoofing, or proxy rotation for evasion is implemented.
 - reCAPTCHA Enterprise tickets are generated only by a real Chrome session that loads the provider's own page and executes its official widget with the matching action.
-- `1200063` / `Verification failed, please try again.` is treated as a controlled mail domain: the batch stops immediately and asks the operator to change the mail domain. It does not attempt to evade risk controls.
+- `1200063` / `Verification failed, please try again.` is treated as a failed single attempt, not proof that an entire mail domain is blocked. The attempt is recorded, the batch supervisor retries with a fresh account/profile after a delay, and no risk-control bypass is attempted.
 - Closing the desktop window stops the supervisor, detached Node helpers, Chrome/CDP processes, and the local proxy bridge; the supervisor status is marked `stopped` and its lock is removed.
 - GUI actions can clear stale risk/daemon state or erase local historical registration records; they never delete accounts that were already bound in the panel.
 - Every account gets a fresh, ephemeral Chrome profile and an OS-assigned CDP port; the Chrome process tree and profile directory are removed after that account finishes or fails.

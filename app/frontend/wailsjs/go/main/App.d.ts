@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function CheckRuntime():Promise<Record<string, string>>;
 
+export function ClearRunState(arg1:boolean):Promise<Record<string, any>>;
+
 export function GetConfig():Promise<main.Config>;
 
 export function GetLatestResults():Promise<Array<main.Result>>;

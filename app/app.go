@@ -34,11 +34,13 @@ func (app *App) startup(ctx context.Context) {
 	app.ctx = ctx
 	cfg, err := LoadConfig()
 	if err == nil {
-		if status, statusErr := readSupervisorStatus(cfg.OutputDir); statusErr == nil && status.Running && processAlive(status.PID) {
+		status, statusErr := readSupervisorStatus(cfg.OutputDir)
+		if statusErr == nil && status.Running && processAlive(status.PID) {
 			_ = app.runner.Start(cfg, false)
-		}
-		if status, statusErr := readSupervisorStatus(cfg.OutputDir); statusErr == nil && !status.Running && status.Phase == "domain-blocked" {
-			_, _ = clearRunState(cfg.OutputDir, false)
+		} else if statusErr == nil && !status.Running && status.Phase == "domain-blocked" {
+			if _, err := clearRunState(cfg.OutputDir, false); err == nil {
+				app.runner.setStatus(RunStatus{Running: false, Phase: "idle", Message: "旧风控状态已清理，可以重新开始", Count: cfg.Count})
+			}
 		}
 	}
 	if os.Getenv("MINIMAX_AUTOSTART") == "1" {
@@ -93,7 +95,7 @@ func (app *App) ClearRunState(includeHistory bool) (map[string]interface{}, erro
 	if err != nil {
 		return nil, err
 	}
-	app.runner.setStatus(RunStatus{Running: false, Phase: "idle", Message: "运行记录已清理，可以重新开始", Count: cfg.Count})
+	app.runner.setStatus(RunStatus{Running: false, Phase: "idle", Message: "旧运行状态已清理，可以重新开始", Count: cfg.Count})
 	return result, nil
 }
 

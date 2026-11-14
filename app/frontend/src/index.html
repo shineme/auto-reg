@@ -37,7 +37,7 @@
           <h1 id="view-title">运行配置</h1>
           <p id="view-subtitle">配置域名邮箱、收信邮箱、代理与批量参数，然后启动协议链路。</p>
         </div>
-        <div class="status-pill" id="status-pill"><span></span>准备就绪</div>
+        <div class="status-pill" id="status-pill"><span class="status-dot"></span><span id="status-text">准备就绪</span></div>
       </header>
 
       <section class="view active" id="view-setup">
@@ -112,7 +112,7 @@
             <button class="button secondary" id="save-config">保存配置</button>
             <button class="button secondary" id="dry-run">票据 dry-run</button>
             <button class="button secondary" id="stop-run" disabled>停止</button>
-            <button class="button secondary" id="clear-state">清理风控状态</button>
+            <button class="button secondary" id="clear-state">清理运行状态</button>
             <button class="button secondary" id="clear-history">清空历史记录</button>
             <button class="button primary" id="start-run">开始批量注册</button>
           </div>

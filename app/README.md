@@ -12,7 +12,7 @@ Go + Wails v2 桌面程序，用于配置 magpie 面板、域名邮箱、IMAP �
 - 启动/停止运行、票据 dry-run、实时日志、运行状态、最近结果表、打开输出目录。
 - 实时显示成功数、失败数、当前账号阶段、自动恢复次数、恢复批次和守护进程 PID。
 - `scripts/minimax-supervisor.mjs` 聚合输出目录里所有时间戳批次的成功账号，写入 `resume-ledger.json`，生成固定 `resume-200` 恢复批次；子进程异常退出后自动以同一批次重启，直到达到目标成功数。
-- 发码接口返回 `1200063 / 人机验证未通过` 时，视为本次注册尝试被风控拦截；批量脚本以退出码 `75` 停止，守护进程立即进入 `domain-blocked`、`running=false`。风控判定只作用于本次运行，启动时会忽略并删除旧风控标记。
+- 发码接口返回 `1200063 / 人机验证未通过` 时，只把当前账号记为失败尝试，不再据此判定整个邮箱域名被风控、不再停机。守护进程间隔后以新邮箱、新设备码和独立临时 Chrome profile 自动继续；启动时会清理旧风控标记与守护状态。
 - reCAPTCHA 页面或票据环境不可用（例如代理出口无法访问 `account.minimax.io`）时立即进入 `environment-unavailable`、`running=false`，提示检查出口或代理；每个账号使用独立临时 Chrome profile，账号结束后立即关闭进程并删除 profile。
 - 代理入口可通过 `MINIMAX_AUTOSTART=1` 启动 GUI 后自动开始批次；这样内置代理桥与守护进程保持同一进程组，避免手动启动 Node 时复用到 GUI 已关闭的本地桥端口。
 - 守护进程向下游脚本显式清空自动启动变量，避免环境变量污染导致重复启动。
@@ -20,7 +20,7 @@ Go + Wails v2 桌面程序，用于配置 magpie 面板、域名邮箱、IMAP �
 - 关闭窗口会调用 `OnShutdown`，通过 Windows Job Object 和显式进程树清理停止守护程序、Node 子进程、Chrome/CDP 与本地代理桥，并把 `supervisor.status.json` 标记为 `stopped`、删除 `supervisor.lock`。
 - 「测试面板连接」按钮只做非 mutating 检查：登录面板、保存 303 的会话 Cookie、读取 `/api/providers`，不会调用 `/api/plugin-signin` 或创建账号。
 - 配置保存在当前用户配置目录，权限为仅当前用户可读写；日志输出会遮蔽凭据和票据。每个账号的 `session.json` 记录该次临时 profile 路径、CDP 端口和 Chrome PID，便于核对隔离与及时清理。
-- 「清理风控状态」只删除本机风控、冷却与守护状态并保留成功账号；「清空历史记录」额外删除本机输出目录中的历史账号目录、汇总和台账，不删除已经绑定到面板的账号。
+- 「清理运行状态」只删除本机旧风控标记与守护状态并保留成功账号；「清空历史记录」额外删除本机输出目录中的历史账号目录、汇总和台账，不删除已经绑定到面板的账号。
 
 ## 运行前提
 
@@ -62,7 +62,7 @@ socks5://example-user:pass:proxy.example.com:10000
 http\://example-user:pass:proxy.example.com:10000
 ```
 
-留空表示直连。不要在不同账号间复用设备码或票据；程序会为每个账号创建独立 BrowserContext 和独立协议状态文件。程序不包含 reCAPTCHA 绕过、票据伪造、指纹伪装或用于规避的代理轮换；遇到 `1200063` 时立即停止并提示更换域名。
+留空表示直连。不要在不同账号间复用设备码或票据；程序会为每个账号创建独立 BrowserContext 和独立协议状态文件。程序不包含 reCAPTCHA 绕过、票据伪造、指纹伪装或用于规避的代理轮换；`1200063` 只作为本次尝试失败处理，由守护进程换新账号自动继续。
 
 ## 验证口径
 
@@ -91,4 +91,4 @@ http\://example-user:pass:proxy.example.com:10000
 
 恢复验证包含 `node scripts/minimax-resume-test.mjs`：它构造一个历史成功账号，模拟守护进程中断，再在同一恢复批次放入第二个成功账号；重新启动后守护进程应识别两个成功账号、写出 `finishedAt`、释放单实例锁，且不会重复创建成功账号。隔离测试还验证了历史成功账号恢复、实时进度文件、强杀子进程后的 `restartCount` 增长和同一目标继续补齐。
 
-`node scripts/minimax-domain-risk-test.mjs` 使用假子脚本验证：首次退出码 `75` 立即进入 `domain-blocked`、`running=false`，`restartCount` 不增长，不写冷却状态文件、不执行第二次探测；写入旧风控标记后重新启动，守护进程会删除旧标记并重新运行一次，而不是被历史状态永久拦住。真实运行中 `1200063` 表示 MiniMax 在发送邮件前拒绝请求，IMAP 没有新验证码属于预期结果，不应通过密集重试消耗设备码。
+`node scripts/minimax-domain-risk-test.mjs` 使用假子脚本验证：发码返回 `1200063` 只记为本轮失败，守护进程会自动恢复再试一次，不进入 `domain-blocked`；写入旧风控标记后重新启动，守护进程会删除旧标记并继续，而不是被历史状态永久拦住。真实运行中 `1200063` 表示 MiniMax 在发送邮件前拒绝了这次请求，IMAP 没有新验证码属于预期结果；程序按间隔换新账号继续，不复用旧设备码。

@@ -96,9 +96,12 @@ function statusClass(status) {
 }
 
 function renderStatus(status) {
+  status = status || {};
   const pill = element("status-pill");
   pill.className = `status-pill ${statusClass(status)}`;
-  pill.lastChild.textContent = status.message || status.phase || "准备就绪";
+  const statusText = element("status-text");
+  if (statusText) statusText.textContent = status.message || status.phase || "准备就绪";
+  else pill.lastChild.textContent = status.message || status.phase || "准备就绪";
   const count = status.count || 0;
   const done = status.done || 0;
   const ok = status.ok || 0;
@@ -126,6 +129,7 @@ function formatTime(value) {
 }
 
 function appendLog(event) {
+  if (!event) return;
   const list = element("log-list");
   const empty = list.querySelector(".empty");
   if (empty) empty.remove();
@@ -153,6 +157,7 @@ function escapeHtml(value) {
 function renderResults(results) {
   const body = element("results-body");
   body.innerHTML = "";
+  results = Array.isArray(results) ? results : [];
   if (!results.length) {
     body.innerHTML = '<tr><td colspan="5" class="empty">暂无结果；完成一次运行后会显示在这里。</td></tr>';
     return;
@@ -169,7 +174,7 @@ async function refreshResults() {
   if (!go) return;
   try {
     const response = await go.GetLatestResults();
-    const results = Array.isArray(response) ? response : [];
+    const results = Array.isArray(response) ? response : (response?.results || []);
     for (const result of results) {
       const key = result.email || result.userCode || result.signInId || result.runDir;
       if (key) liveResults.set(key, result);
@@ -224,11 +229,11 @@ async function clearRunState(includeHistory) {
   if (!go) return;
   const question = includeHistory
     ? "将删除本机输出目录中的历史账号结果、汇总、风控和守护状态；真实面板账号不会被删除。确认继续？"
-    : "将删除本机风控标记、守护状态和冷却状态；已成功账号记录会保留。确认继续？";
+    : "将删除本机旧风控标记、守护状态和运行状态；已成功账号记录会保留。确认继续？";
   if (!window.confirm(question)) return;
   try {
     const result = await go.ClearRunState(includeHistory);
-    toast(includeHistory ? "历史记录已清空，可以重新开始" : "风控状态已清理，可以重新点击开始", "success");
+    toast(includeHistory ? "历史记录已清空，可以重新开始" : "运行状态已清理，可以重新点击开始", "success");
     liveResults.clear();
     renderResults([]);
     renderStatus(await go.GetRunStatus());
@@ -260,6 +265,7 @@ async function init() {
   form.addEventListener("submit", (event) => event.preventDefault());
 
   runtime.EventsOn("run-event", (event) => {
+    event = event || {};
     appendLog(event);
     if (event.type === "result" && event.result) {
       const key = event.result.email || event.result.userCode || event.result.signInId || event.result.runDir;
@@ -269,15 +275,16 @@ async function init() {
     if (event.type === "refresh-results") refreshResults();
   });
   runtime.EventsOn("run-status", (status) => {
+    status = status || {};
     renderStatus(status);
-    if (!status.running && (status.phase === "done" || status.phase === "failed")) refreshResults();
+    if (!status.running && ["done", "failed", "stopped", "domain-blocked", "environment-unavailable"].includes(status.phase)) refreshResults();
   });
 
   try {
     fillForm((await go.GetConfig()) || {});
     renderStatus((await go.GetRunStatus()) || {});
     const response = await go.GetRunEvents();
-    const events = Array.isArray(response) ? response : [];
+    const events = Array.isArray(response) ? response : (response?.events || []);
     if (events.length) { element("log-list").innerHTML = ""; events.forEach(appendLog); }
     await refreshResults();
   } catch (error) { toast(`加载界面数据失败：${error.message || error}`, "error"); }

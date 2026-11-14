@@ -57,10 +57,10 @@ button { color: inherit; }
 .topbar h1 { margin: 0; font-size: 25px; line-height: 1.2; letter-spacing: -0.035em; font-weight: 650; }
 .topbar p { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
 .status-pill { display: flex; align-items: center; gap: 8px; flex: none; padding: 9px 13px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); font-size: 12px; }
-.status-pill span { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
-.status-pill.running span { background: var(--info); box-shadow: 0 0 0 4px rgba(124,157,255,.15); }
-.status-pill.done span { background: var(--accent); box-shadow: 0 0 0 4px rgba(109,226,177,.13); }
-.status-pill.failed span { background: var(--danger); box-shadow: 0 0 0 4px rgba(255,126,138,.13); }
+.status-pill .status-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.status-pill.running .status-dot { background: var(--info); box-shadow: 0 0 0 4px rgba(124,157,255,.15); }
+.status-pill.done .status-dot { background: var(--accent); box-shadow: 0 0 0 4px rgba(109,226,177,.13); }
+.status-pill.failed .status-dot { background: var(--danger); box-shadow: 0 0 0 4px rgba(255,126,138,.13); }
 
 .view { display: none; flex: 1; min-height: 0; overflow: auto; padding: 24px 34px 28px; }
 .view.active { display: block; }

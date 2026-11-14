@@ -6,6 +6,10 @@ export function CheckRuntime() {
   return window['go']['main']['App']['CheckRuntime']();
 }
 
+export function ClearRunState(arg1) {
+  return window['go']['main']['App']['ClearRunState'](arg1);
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }

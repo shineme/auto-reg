@@ -14,11 +14,8 @@ const progressPath = path.join(batchRoot, "supervisor.progress.json");
 const ledgerPath = path.join(batchRoot, "resume-ledger.json");
 const summaryPath = path.join(root, "summary.json");
 const batchScript = path.resolve(process.env.MINIMAX_BATCH_SCRIPT || path.join(workspace, "scripts", "minimax-fast-batch.mjs"));
-const riskControlPath = path.join(root, "risk-control.json");
-const riskStatePath = path.join(batchRoot, "risk-state.json");
-const riskExitCode = 75;
-const riskControlPattern = /1200063|人机验证未通过|Verification failed, please try again/i;
 const captchaUnavailablePattern = /reCAPTCHA Enterprise did not become ready|reCAPTCHA Enterprise returned no ticket|CDP browser did not become ready|CDP version HTTP|reCAPTCHA 票据环境暂不可用|ECONNRESET|socket connection was closed unexpectedly|The operation was aborted due to timeout|fetch failed/i;
+const retryDelayMs = Math.max(0, Number(process.env.MINIMAX_RETRY_DELAY_MS || 15000));
 const pid = process.pid;
 const startedAt = new Date().toISOString();
 let progressSequence = 0;
@@ -140,16 +137,38 @@ async function collectResults() {
         continue;
       }
       if (typeof result.ok !== "boolean") continue;
-      if (!result.ok && result.riskBlocked) continue;
+      if (!result.ok && !captchaUnavailablePattern.test(result.error || "")) failures.push({ batch: batch.name, account: account.name, error: result.error || "" });
+      else if (!result.ok) continue;
       if (result.ok) {
         const key = result.email || result.userCode || result.signInId || result.runDir;
         if (!successes.has(key)) successes.set(key, result);
-      } else {
-        failures.push({ batch: batch.name, account: account.name, error: result.error || "" });
       }
     }
   }
   return { successes: [...successes.values()], failures };
+}
+
+async function removeStaleRiskFiles() {
+  await fs.rm(path.join(batchRoot, "risk-state.json"), { force: true });
+  const entries = await fs.readdir(batchRoot, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    await fs.rm(path.join(batchRoot, entry.name, "risk-control.json"), { force: true });
+    if (!/^\d{8}-\d{6}$/.test(entry.name) && entry.name !== batchId) continue;
+    const accounts = await fs.readdir(path.join(batchRoot, entry.name), { withFileTypes: true }).catch(() => []);
+    for (const account of accounts) {
+      if (!account.isDirectory() || !account.name.startsWith("account-")) continue;
+      let result;
+      try {
+        result = JSON.parse(await fs.readFile(path.join(batchRoot, entry.name, account.name, "result.json"), "utf8"));
+      } catch {
+        continue;
+      }
+      if (!result.ok && /1200063|人机验证未通过|Verification failed, please try again/i.test(result.error || "")) {
+        await fs.rm(path.join(batchRoot, entry.name, account.name, "result.json"), { force: true });
+      }
+    }
+  }
 }
 
 async function prepareResumeBatch() {
@@ -228,7 +247,6 @@ async function runChild(restartCount) {
     const child = spawn(process.execPath, [batchScript], { cwd: workspace, env, stdio: ["ignore", "pipe", "pipe"] });
     let stdoutTail = "";
     let stderrTail = "";
-    let riskDetected = false;
     let captchaUnavailableDetected = false;
     const forward = (isError) => (chunk) => {
       const text = chunk.toString("utf8");
@@ -246,7 +264,6 @@ async function runChild(restartCount) {
     };
     const forwardChunk = (isError) => (chunk) => {
       const text = chunk.toString("utf8");
-      if (riskControlPattern.test(text)) riskDetected = true;
       if (captchaUnavailablePattern.test(text)) captchaUnavailableDetected = true;
       forward(isError)(text);
     };
@@ -269,10 +286,8 @@ async function runChild(restartCount) {
     child.on("close", (code) => {
       if (stdoutTail.trim()) printStructuredProgress(stdoutTail.trim(), restartCount);
       if (stderrTail.trim()) process.stderr.write(`${redactText(stderrTail.trim())}\n`);
-      if (riskControlPattern.test(stdoutTail) || riskControlPattern.test(stderrTail)) riskDetected = true;
       if (captchaUnavailablePattern.test(stdoutTail) || captchaUnavailablePattern.test(stderrTail)) captchaUnavailableDetected = true;
-      const riskBlocked = riskDetected || code === riskExitCode;
-      finish({ code, error: "", riskBlocked, captchaUnavailable: captchaUnavailableDetected });
+      finish({ code, error: "", captchaUnavailable: captchaUnavailableDetected });
     });
   });
 }
@@ -292,17 +307,15 @@ async function currentSummary() {
   return { succeeded, failed, attempts, finishedAt: summary.finishedAt || null };
 }
 
-async function publishStopped(summary, reason, lastExitCode, restartCount) {
+async function publishStopped(summary, lastExitCode, restartCount) {
   const fields = {
-    phase: reason === "domain-risk-controlled" ? "domain-blocked" : "environment-unavailable",
+    phase: "environment-unavailable",
     running: false,
     succeeded: summary.succeeded,
     failed: summary.failed,
     restartCount,
     lastExitCode,
-    message: reason === "domain-risk-controlled"
-      ? `域名已被风控，任务已停止；已保留 ${summary.succeeded} 个成功账号，请更换邮箱域名后重新开始`
-      : `reCAPTCHA 票据环境暂不可用，任务已停止；已保留 ${summary.succeeded} 个成功账号，请检查出口或代理`,
+    message: `reCAPTCHA 票据环境暂不可用，任务已停止；已保留 ${summary.succeeded} 个成功账号，请检查出口或代理`,
   };
   await publishStatus(fields);
   await publishProgress(progressEvent({
@@ -359,8 +372,8 @@ async function main() {
   heartbeatTimer.unref();
   try {
     let prepared = await prepareResumeBatch();
-    await fs.rm(riskStatePath, { force: true });
-    await fs.rm(riskControlPath, { force: true });
+    await removeStaleRiskFiles();
+    prepared = await prepareResumeBatch();
     await publishStatus({ phase: "resume", running: true, succeeded: prepared.succeeded, failedAttempts: prepared.failures, restartCount, message: `已恢复 ${prepared.succeeded}/${targetSuccessCount} 个成功账号` });
     await publishProgress(progressEvent({ phase: "resume", done: prepared.succeeded, ok: prepared.succeeded, attempts: prepared.succeeded, message: `已恢复 ${prepared.succeeded}/${targetSuccessCount} 个成功账号，正在继续补齐` }));
     while (true) {
@@ -376,9 +389,8 @@ async function main() {
       const child = await runChild(restartCount);
       prepared = await prepareResumeBatch();
       const after = await currentSummary();
-      if (child.riskBlocked || child.captchaUnavailable || (!child.targetReached && child.code === 0)) {
-        const reason = child.riskBlocked ? "domain-risk-controlled" : "environment-unavailable";
-        await publishStopped(after, reason, child.code, restartCount);
+      if (child.captchaUnavailable || (child.code === 0 && !child.targetReached && !after.finishedAt && prepared.succeeded < targetSuccessCount)) {
+        await publishStopped(after, child.code, restartCount);
         return;
       }
       if (prepared.succeeded >= targetSuccessCount || after.finishedAt) {
@@ -387,9 +399,10 @@ async function main() {
         return;
       }
       restartCount += 1;
-      await publishStatus({ phase: "restarting", running: true, succeeded: after.succeeded, failed: after.failed, restartCount, lastExitCode: child.code, message: `任务中断（退出码 ${child.code}），5 秒后自动恢复` });
-      await publishProgress(progressEvent({ phase: "restarting", done: after.succeeded, ok: after.succeeded, failed: after.failed, attempts: after.attempts, restartCount, message: `任务中断（退出码 ${child.code}），5 秒后自动恢复` }));
-      await delay(5000);
+      const delaySeconds = Math.ceil(retryDelayMs / 1000);
+      await publishStatus({ phase: "restarting", running: true, succeeded: after.succeeded, failed: after.failed, restartCount, lastExitCode: child.code, message: `本次尝试未成功（退出码 ${child.code}），${delaySeconds} 秒后自动恢复` });
+      await publishProgress(progressEvent({ phase: "restarting", done: after.succeeded, ok: after.succeeded, failed: after.failed, attempts: after.attempts, restartCount, message: `本次尝试未成功（退出码 ${child.code}），${delaySeconds} 秒后自动恢复` }));
+      await delay(retryDelayMs);
     }
   } finally {
     clearInterval(heartbeatTimer);

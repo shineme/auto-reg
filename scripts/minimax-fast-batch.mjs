@@ -29,10 +29,7 @@ const panelCheckOnly = process.env.PANEL_CHECK_ONLY === "1";
 const signInPollSeconds = Number(process.env.SIGN_IN_POLL_SECONDS || 90);
 const captchaReadyAttempts = Number(process.env.CAPTCHA_READY_ATTEMPTS || 60);
 const captchaPrewarmUrl = process.env.CAPTCHA_PREWARM_URL || "https://account.minimax.io/unified-login";
-const riskControlPattern = /1200063|人机验证未通过|Verification failed, please try again/i;
-const riskExitCode = 75;
 const captchaUnavailablePattern = /reCAPTCHA Enterprise did not become ready|reCAPTCHA Enterprise returned no ticket|CDP browser did not become ready|CDP version HTTP|ECONNRESET|socket connection was closed unexpectedly|The operation was aborted due to timeout|fetch failed/i;
-const riskControlPath = path.join(root, "risk-control.json");
 const siteKey = process.env.MINIMAX_RECAPTCHA_SITE_KEY || "";
 const captchaAction = "send_code";
 const captchaPrewarmHost = "account.minimax.io";
@@ -103,7 +100,7 @@ async function readJson(filePath) {
 }
 
 function publicResult(result) {
-  return {
+  const value = {
     ok: Boolean(result.ok),
     email: result.email || "",
     user: result.user || "",
@@ -115,14 +112,15 @@ function publicResult(result) {
     runDir: result.runDir || "",
     startedAt: result.startedAt || "",
     completedAt: result.completedAt || "",
-    riskBlocked: Boolean(result.riskBlocked),
   };
+  if (result.retryable !== undefined) value.retryable = Boolean(result.retryable);
+  return value;
 }
 
 function updateProgressState(results, current) {
   progressState.succeeded = results.filter((result) => result.ok).length;
-  progressState.failed = results.filter((result) => !result.ok && !result.riskBlocked).length;
-  progressState.attempts = results.filter((result) => !result.riskBlocked).length;
+  progressState.failed = results.filter((result) => !result.ok).length;
+  progressState.attempts = results.length;
   progressState.current = current;
 }
 
@@ -177,7 +175,7 @@ async function loadExistingResults() {
     const resultPath = path.join(root, entry.name, "result.json");
     try {
       const result = JSON.parse(await fs.readFile(resultPath, "utf8"));
-      if (!result.ok && (riskControlPattern.test(result.error || "") || captchaUnavailablePattern.test(result.error || ""))) {
+      if (!result.ok && captchaUnavailablePattern.test(result.error || "")) {
         await fs.rm(resultPath, { force: true });
         continue;
       }
@@ -753,8 +751,6 @@ async function processAccount(task, beforeUsers, progressHandler) {
     await writeJson(task.resultPath, result);
     return { index: task.index, ok: true, user: result.user, email: result.email, runDir: task.runDir, startedAt };
   } catch (error) {
-    const riskBlocked = riskControlPattern.test(error.message);
-    if (riskBlocked) await fs.rm(task.resultPath, { force: true });
     const result = {
       ok: false,
       email: task.email,
@@ -762,20 +758,18 @@ async function processAccount(task, beforeUsers, progressHandler) {
       userCode: task.userCode,
       signInId: task.signInId,
       error: error.message,
-      riskBlocked,
       runDir: task.runDir,
       startedAt,
       completedAt: new Date().toISOString(),
     };
-    if (!riskBlocked) await writeJson(task.resultPath, result);
-    return { index: task.index, ok: false, error: error.message, riskBlocked, runDir: task.runDir, startedAt };
+    await writeJson(task.resultPath, result);
+    return { index: task.index, ok: false, error: error.message, runDir: task.runDir, startedAt };
   }
 }
 
 async function writeSummary(results, finished = false) {
-  const counted = results.filter((result) => !result.riskBlocked);
-  const succeeded = counted.filter((result) => result.ok).length;
-  const failed = counted.filter((result) => !result.ok).length;
+  const succeeded = results.filter((result) => result.ok).length;
+  const failed = results.filter((result) => !result.ok).length;
   const summary = {
     batchId,
     requested: targetSuccessCount,
@@ -783,7 +777,7 @@ async function writeSummary(results, finished = false) {
     done: succeeded,
     succeeded,
     failed,
-    attempts: counted.length,
+    attempts: results.length,
     updatedAt: new Date().toISOString(),
     results,
   };
@@ -885,10 +879,9 @@ async function main() {
             index: task.index,
             ok: false,
             error: task.prewarmError,
-            riskBlocked: riskControlPattern.test(task.prewarmError),
             runDir: task.runDir,
           };
-          if (!riskControlPattern.test(task.prewarmError) && !captchaUnavailablePattern.test(task.prewarmError)) {
+          if (!captchaUnavailablePattern.test(task.prewarmError)) {
             await writeJson(task.resultPath, { ok: false, error: task.prewarmError, email: task.email, userCode: task.userCode, signInId: task.signInId, runDir: task.runDir, completedAt: new Date().toISOString() });
           }
         }
@@ -897,14 +890,6 @@ async function main() {
       updateProgressState(results, nextIndex);
       await writeSummary(results);
       emitAccountResult(result);
-      if (result.riskBlocked) {
-        results.pop();
-        updateProgressState(results, nextIndex);
-        await writeSummary(results);
-        emitProgress("domain-blocked", "域名已被风控，任务已停止；请更换邮箱域名后重新开始", { current: task.index });
-        process.exitCode = riskExitCode;
-        return;
-      }
       if (captchaUnavailablePattern.test(result.error || "")) {
         emitProgress("environment-unavailable", "reCAPTCHA 票据环境暂不可用，本轮已停止；请检查出口或代理", { current: task.index });
         process.exitCode = 1;
@@ -917,7 +902,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  if (riskControlPattern.test(error.message)) process.exitCode = riskExitCode;
-  else process.exitCode = 1;
+  process.exitCode = 1;
   console.error(JSON.stringify({ ok: false, error: error.message }));
 });
