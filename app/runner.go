@@ -289,6 +289,9 @@ func (runner *runner) execute(ctx context.Context, cfg Config, dryRun bool) erro
 		runner.log("info", "已启动本地代理桥；上游类型不会写入日志")
 	}
 	env := append(os.Environ(),
+		"MINIMAX_SIGNATURE_SALT="+os.Getenv("MINIMAX_SIGNATURE_SALT"),
+		"MINIMAX_YY_SUFFIX="+os.Getenv("MINIMAX_YY_SUFFIX"),
+		"MINIMAX_RECAPTCHA_SITE_KEY="+os.Getenv("MINIMAX_RECAPTCHA_SITE_KEY"),
 		"PANEL_BASE="+cfg.PanelBase,
 		"PANEL_KEY="+cfg.PanelKey,
 		"IMAP_HOST="+cfg.ImapHost,

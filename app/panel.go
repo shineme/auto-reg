@@ -33,6 +33,9 @@ func (app *App) TestPanel(config Config) (PanelCheckResult, error) {
 		return PanelCheckResult{}, err
 	}
 	env := append(os.Environ(),
+		"MINIMAX_SIGNATURE_SALT="+os.Getenv("MINIMAX_SIGNATURE_SALT"),
+		"MINIMAX_YY_SUFFIX="+os.Getenv("MINIMAX_YY_SUFFIX"),
+		"MINIMAX_RECAPTCHA_SITE_KEY="+os.Getenv("MINIMAX_RECAPTCHA_SITE_KEY"),
 		"PANEL_BASE="+config.PanelBase,
 		"PANEL_KEY="+config.PanelKey,
 		"PANEL_CHECK_ONLY=1",

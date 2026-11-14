@@ -133,13 +133,16 @@ func (cfg *Config) applyDefaults() {
 
 func (cfg Config) Validate() error {
 	for name, value := range map[string]string{
-		"面板地址":     cfg.PanelBase,
-		"面板密钥":     cfg.PanelKey,
-		"邮箱域名":     cfg.MailDomain,
-		"IMAP 主机":  cfg.ImapHost,
-		"IMAP 用户":  cfg.ImapUser,
-		"IMAP 授权码": cfg.ImapPassword,
-		"脚本目录":     cfg.ScriptsDir,
+		"面板地址":                       cfg.PanelBase,
+		"面板密钥":                       cfg.PanelKey,
+		"邮箱域名":                       cfg.MailDomain,
+		"IMAP 主机":                    cfg.ImapHost,
+		"IMAP 用户":                    cfg.ImapUser,
+		"IMAP 授权码":                   cfg.ImapPassword,
+		"脚本目录":                       cfg.ScriptsDir,
+		"MINIMAX_SIGNATURE_SALT":     os.Getenv("MINIMAX_SIGNATURE_SALT"),
+		"MINIMAX_YY_SUFFIX":          os.Getenv("MINIMAX_YY_SUFFIX"),
+		"MINIMAX_RECAPTCHA_SITE_KEY": os.Getenv("MINIMAX_RECAPTCHA_SITE_KEY"),
 	} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("%s不能为空", name)
@@ -170,6 +173,15 @@ func (cfg Config) Validate() error {
 }
 
 func (cfg Config) ValidatePanelCheck() error {
+	for name, value := range map[string]string{
+		"MINIMAX_SIGNATURE_SALT":     os.Getenv("MINIMAX_SIGNATURE_SALT"),
+		"MINIMAX_YY_SUFFIX":          os.Getenv("MINIMAX_YY_SUFFIX"),
+		"MINIMAX_RECAPTCHA_SITE_KEY": os.Getenv("MINIMAX_RECAPTCHA_SITE_KEY"),
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("%s不能为空", name)
+		}
+	}
 	base := strings.TrimSpace(cfg.PanelBase)
 	if base == "" {
 		return errors.New("面板地址不能为空")
