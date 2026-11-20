@@ -68,3 +68,8 @@ singbox-*.json
 *.log
 artifacts/
 _cj.txt
+
+# 本地临时脚本 / 抓取样本（含 VPS 密码等凭据，不入库）
+_*.py
+_*.txt
+_*.html

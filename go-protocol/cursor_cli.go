@@ -63,6 +63,22 @@ func saveCursorResult(cfg Config, res cursorAccountResult) {
 // cursorDirectProxy 为 true 时 Chrome 不走本地代理桥，直接用系统代理。
 var cursorDirectProxy = os.Getenv("MINIMAX_CURSOR_DIRECT") == "1"
 
+// cursorBrowserProxy 单独指定 Cursor 浏览器走的代理（留空则用配置里的代理）。
+// 用途：面板 / 邮箱取信和浏览器可能需要不同出口，Cursor 对数据中心 IP 很敏感。
+var cursorBrowserProxy = ""
+
+// resolveCursorBrowserProxy 决定 Cursor 浏览器用哪个出口。
+func resolveCursorBrowserProxy(cfg Config) string {
+	if cursorDirectProxy {
+		// 显式要求直连。
+	return ""
+	}
+	if cursorBrowserProxy != "" {
+	return cursorBrowserProxy
+	}
+	return cfg.ProxyURL
+}
+
 func runCLITestCursor(panelBase, panelKey, email string) {
 	cfg := loadCLIConfig()
 	cfg.applyDefaults()
@@ -90,14 +106,26 @@ func runCLITestCursor(panelBase, panelKey, email string) {
 		dialer = d
 	}
 	bridgeAddr := ""
-	if dialer != nil && dialer.Enabled() && !cursorDirectProxy {
-		bridge, addr, err := StartLocalHTTPBridgeWithDialer(dialer)
-		if err != nil {
-			fmt.Printf("[cursor] 启动本地代理桥失败: %v\n", err)
+	if browserProxy := resolveCursorBrowserProxy(cfg); browserProxy != "" {
+		bd, berr := NewProxyDialer(browserProxy)
+		if berr != nil {
+			fmt.Printf("[cursor] 浏览器代理配置错误: %v\n", berr)
 			return
 		}
-		defer bridge.Close()
-		bridgeAddr = addr
+		if bd.Enabled() {
+			bridge, addr, err := StartLocalHTTPBridgeWithDialer(bd)
+			if err != nil {
+				fmt.Printf("[cursor] 启动本地代理桥失败: %v\n", err)
+				return
+			}
+			defer bridge.Close()
+			bridgeAddr = addr
+		}
+	}
+	if bridgeAddr == "" {
+		fmt.Printf("[cursor] 浏览器直连（不走代理）\n")
+	} else {
+		fmt.Printf("[cursor] 浏览器走本地代理桥 %s\n", bridgeAddr)
 	}
 
 	poolPath := cfg.HotmailPool
@@ -221,6 +249,28 @@ func runCLICursorBatch(panelBase, panelKey string, count int) {
 			dialer = d
 		}
 	}
+	bridgeAddr := ""
+	if browserProxy := resolveCursorBrowserProxy(cfg); browserProxy != "" {
+		bd, berr := NewProxyDialer(browserProxy)
+		if berr != nil {
+			fmt.Printf("[cursor] 浏览器代理配置错误: %v\n", berr)
+			return
+		}
+		if bd.Enabled() {
+			bridge, addr, err := StartLocalHTTPBridgeWithDialer(bd)
+			if err != nil {
+				fmt.Printf("[cursor] 启动本地代理桥失败: %v\n", err)
+				return
+			}
+			defer bridge.Close()
+			bridgeAddr = addr
+		}
+	}
+	if bridgeAddr == "" {
+		fmt.Printf("[cursor] 浏览器直连（不走代理）\n")
+	} else {
+		fmt.Printf("[cursor] 浏览器走本地代理桥 %s\n", bridgeAddr)
+	}
 	poolPath := cfg.HotmailPool
 	store := NewHotmailPoolStore(poolPath)
 	ctx := context.Background()
@@ -243,7 +293,7 @@ func runCLICursorBatch(panelBase, panelKey string, count int) {
 		flow := &CursorFlow{
 			Panel:      panel,
 			ChromePath: cfg.ChromePath,
-			ProxyBidge: "",
+			ProxyBidge: bridgeAddr,
 			ProfileDir: filepath.Join(cursorTestDir(cfg), "chrome-profiles"),
 			FetchLink: func(ctx context.Context, notBefore time.Time) (string, error) {
 				return PollHotmailLink(ctx, mailClient, acc, notBefore, 3*time.Minute, "cursor-confirm")

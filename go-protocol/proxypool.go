@@ -44,6 +44,8 @@ type ProxyNodeInfo struct {
 	Dial string `json:"dial,omitempty"`
 	// Forward 标记该节点是正向代理（absolute-form），不支持 CONNECT 隧道。
 	Forward bool `json:"forward,omitempty"`
+	// Origin 记录该节点来自哪个订阅（多订阅合并时用于排查来源）。
+	Origin string `json:"origin,omitempty"`
 }
 
 // ProxyPool 是本地保存的节点池文件。
@@ -361,6 +363,15 @@ func CheckProxyNode(ctx context.Context, node ProxyNodeInfo, checkURL string) Pr
 	if err != nil {
 		node.Alive = false
 		node.Error = err.Error()
+		node.ExitIP = ""
+		node.Dial = ""
+		return node
+	}
+	// 二次校验：能访问 ipify 不代表能过 Google 风控探测（reCAPTCHA）。
+	// 这类节点会在取票据时卡 25 秒超时，直接判死省得拖慢批量。
+	if gerr := probeGoogleViaNode(ctx, node, mode); gerr != nil {
+		node.Alive = false
+		node.Error = "google 探测失败: " + gerr.Error()
 		node.ExitIP = ""
 		node.Dial = ""
 		return node

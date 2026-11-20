@@ -27,6 +27,7 @@ type Config struct {
 	HotmailPool             string   `json:"hotmailPool"`
 	HotmailPreflightWorkers int      `json:"hotmailPreflightWorkers"`
 	ProxyURL                string   `json:"proxyUrl"`
+	CursorProxy             string   `json:"cursorProxy,omitempty"`
 	ProxyDirectHosts        []string `json:"proxyDirectHosts"`
 	ProxyRegionRotate       string   `json:"proxyRegionRotate"`
 	ProxySessTime           int      `json:"proxySessTime"`
@@ -222,7 +223,7 @@ func (cfg *Config) applyDefaults() {
 		cfg.RecaptchaSiteKey = os.Getenv("MINIMAX_RECAPTCHA_SITE_KEY")
 	}
 	cfg.ProxyPoolFile = strings.TrimSpace(cfg.ProxyPoolFile)
-	cfg.ProxySubscriptionURL = strings.TrimSpace(cfg.ProxySubscriptionURL)
+	cfg.ProxySubscriptionURL = normalizeSubscriptionURLs(cfg.ProxySubscriptionURL)
 	if cfg.ProxyPoolWorkers <= 0 {
 		cfg.ProxyPoolWorkers = 16
 	}
@@ -235,6 +236,33 @@ func (cfg *Config) applyDefaults() {
 	if cfg.ProxyDirectHosts == nil {
 		cfg.ProxyDirectHosts = d.ProxyDirectHosts
 	}
+}
+
+// normalizeSubscriptionURLs 允许同时填多个订阅地址（换行/逗号/分号分隔），统一存成多行文本。
+func normalizeSubscriptionURLs(raw string) string {
+	return strings.Join(splitSubscriptionURLs(raw), "\n")
+}
+
+// splitSubscriptionURLs 拆分多个订阅地址并去重（保序）。
+func splitSubscriptionURLs(raw string) []string {
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+	switch r {
+		case '\n', '\r', ',', ';', '\t', ' ':
+			return true
+		}
+		return false
+	})
+	seen := map[string]bool{}
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		u := strings.TrimSpace(p)
+		if u == "" || seen[u] {
+			continue
+		}
+		seen[u] = true
+		out = append(out, u)
+	}
+	return out
 }
 
 func (cfg Config) Validate() error {

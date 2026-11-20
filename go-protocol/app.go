@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -336,39 +337,48 @@ func (a *App) GetHotmailStats(cfg Config) (HotmailPoolStats, error) {
 func (a *App) ImportProxySubscription(cfg Config) (ProxyPoolStats, error) {
 	cfg.applyDefaults()
 	hasLocal := len(parseLocalPorts(cfg.ProxyLocalPorts)) > 0
-	if strings.TrimSpace(cfg.ProxySubscriptionURL) == "" && !hasLocal {
+	urls := splitSubscriptionURLs(cfg.ProxySubscriptionURL)
+	if len(urls) == 0 && !hasLocal {
 		return ProxyPoolStats{}, errors.New("订阅地址不能为空")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
 	var nodes []ProxyNodeInfo
-	var err error
-	if strings.TrimSpace(cfg.ProxySubscriptionURL) != "" {
-		nodes, err = FetchProxySubscription(ctx, cfg.ProxySubscriptionURL)
-	}
-	if err != nil {
-		// 订阅拉取失败也允许只用本地端口池
-		if len(parseLocalPorts(cfg.ProxyLocalPorts)) == 0 {
-			return ProxyPoolStats{}, err
+	seen := map[string]bool{}
+	var fetchErrs []string
+	if len(urls) > 0 {
+		fetched, errs := fetchSubscriptions(urls)
+		for i, list := range fetched {
+			origin := shortSubscriptionLabel(urls[i])
+			for _, n := range list {
+				key := proxyNodeKey(n)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				n.Origin = origin
+				nodes = append(nodes, n)
+			}
+			a.emitBatchLog("info", fmt.Sprintf("订阅 %s：%d 个节点", origin, len(list)))
 		}
-		nodes = nil
+		fetchErrs = errs
+		for _, e := range fetchErrs {
+			a.emitBatchLog("error", "订阅拉取失败："+e)
+		}
+	}
+	if len(nodes) == 0 && len(fetchErrs) > 0 && !hasLocal {
+		return ProxyPoolStats{}, errors.New("订阅拉取失败: " + strings.Join(fetchErrs, "; "))
 	}
 	// 本地端口池（sing-box 等内核暴露的一端口一出口）
 	local := localPortNodes(parseLocalPorts(cfg.ProxyLocalPorts))
-	existing := map[string]bool{}
-	for _, n := range nodes {
-		existing[n.Server+":"+itoa(n.Port)] = true
-	}
 	for _, n := range local {
-		key := n.Server + ":" + itoa(n.Port)
-		if existing[key] {
+		key := proxyNodeKey(n)
+		if seen[key] {
 			continue
 		}
-		existing[key] = true
+		seen[key] = true
 		nodes = append(nodes, n)
 	}
 	path := proxyPoolPath(cfg)
-	pool := ProxyPool{Source: cfg.ProxySubscriptionURL, Nodes: nodes}
+	pool := ProxyPool{Source: strings.Join(urls, "\n"), Nodes: nodes}
 	// 保留已有节点的测活结果（按 server:port 匹配）
 	if old, err := LoadProxyPool(path); err == nil {
 		prev := map[string]ProxyNodeInfo{}
@@ -388,8 +398,63 @@ func (a *App) ImportProxySubscription(cfg Config) (ProxyPoolStats, error) {
 		return ProxyPoolStats{}, err
 	}
 	stats := pool.Stats()
-	a.emitBatchLog("info", fmt.Sprintf("订阅拉取完成：%d 个节点已写入 %s", stats.Total, path))
+	a.emitBatchLog("info", fmt.Sprintf("订阅拉取完成：%d 个订阅 / %d 个节点已写入 %s", len(urls), stats.Total, path))
 	return stats, nil
+}
+
+// fetchSubscriptions 并发拉取多个订阅，返回每个订阅的节点列表与失败原因。
+func fetchSubscriptions(urls []string) ([][]ProxyNodeInfo, []string) {
+	type subResult struct {
+		nodes []ProxyNodeInfo
+		err   error
+	}
+	results := make([]subResult, len(urls))
+	var wg sync.WaitGroup
+	for i, u := range urls {
+		wg.Add(1)
+		go func(i int, u string) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+			defer cancel()
+			list, err := FetchProxySubscription(ctx, u)
+			results[i] = subResult{nodes: list, err: err}
+		}(i, u)
+	}
+	wg.Wait()
+	out := make([][]ProxyNodeInfo, len(urls))
+	var errs []string
+	for i, r := range results {
+		out[i] = r.nodes
+		if r.err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", shortSubscriptionLabel(urls[i]), r.err))
+		}
+	}
+	return out, errs
+}
+
+// proxyNodeKey 节点去重键：协议 + 服务器 + 端口 + 用户名。
+func proxyNodeKey(n ProxyNodeInfo) string {
+	return strings.ToLower(n.Type) + "|" + n.Server + "|" + itoa(n.Port) + "|" + n.Username
+}
+
+// shortSubscriptionLabel 生成便于日志阅读的订阅短名（host + 路径末段）。
+func shortSubscriptionLabel(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		if len(raw) > 40 {
+			return raw[:40] + "…"
+		}
+		return raw
+	}
+	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
+	last := ""
+	if len(segs) > 0 {
+		last = segs[len(segs)-1]
+}
+	if last == "" {
+	return u.Host
+	}
+	return u.Host + "/" + last
 }
 
 // CheckProxyPool 对节点池做并发测活，并写回文件。

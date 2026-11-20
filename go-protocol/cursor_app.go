@@ -75,10 +75,28 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 			dialer = d
 		}
 	}
-	// 浏览器走系统代理直连（本地代理桥对 cursor.com 的 CONNECT 常被上游拒绝），
-	// 面板与 Graph 邮箱请求仍走配置的上游代理。
+	// Cursor 浏览器单独配一个出口：Cursor 对数据中心 IP 很敏感，
+	// 数据中心 IP 会被 cursor.com 直接 reset，需要住宅代理。
 	bridgeAddr := ""
-	a.emitBatchLog("info", "[cursor] 浏览器走系统代理，面板与邮箱请求走配置代理")
+	browserProxy := cfg.CursorProxy
+	if browserProxy == "" {
+		browserProxy = cfg.ProxyURL
+	}
+	if browserProxy != "" {
+		bd, berr := NewProxyDialer(browserProxy)
+		if berr == nil && bd.Enabled() {
+			bridge, addr, err := StartLocalHTTPBridgeWithDialer(bd)
+			if err == nil {
+				defer bridge.Close()
+				bridgeAddr = addr
+			}
+		}
+	}
+	if bridgeAddr == "" {
+		a.emitBatchLog("info", "[cursor] 浏览器直连（未配置 Cursor 代理）")
+	} else {
+		a.emitBatchLog("info", "[cursor] 浏览器走独立代理出口 "+bridgeAddr)
+	}
 	poolPath := cfg.HotmailPool
 	store := NewHotmailPoolStore(poolPath)
 	panel, err := NewPanelClient(panelBase, panelKey, dialer, cfg.ProxyDirectHosts)

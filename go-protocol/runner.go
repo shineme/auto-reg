@@ -448,6 +448,28 @@ func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDi
 	r.setStage("获取风控票据", res.Email, workerID)
 	ticketRes, err := tp.AcquireTicket(ctx, res.Email, signIn.Code)
 	if err != nil {
+		// 取票据失败多为代理节点不响应（i/o timeout / connection reset），
+		// 属于可恢复错误：换出口重试，而不是直接放弃这个邮箱。
+		for retry := 1; retry <= 3 && err != nil; retry++ {
+			if !isRecoverableNetworkError(err) {
+				break
+			}
+			if ctx.Err() != nil {
+				break
+			}
+			r.emitLog("info", fmt.Sprintf("[%s] 取票据失败（%v），换出口重试 %d/3", res.Email, err, retry))
+			if dialer != nil {
+				// 这个出口连不上 Google，摘掉它，别再轮回到。
+				if name := dialer.MarkCurrentNodeDead(); name != "" {
+					r.emitLog("info", fmt.Sprintf("[%s] 摘除失效节点：%s", res.Email, name))
+				}
+				dialer.RotateSession()
+			}
+			time.Sleep(2 * time.Second)
+			ticketRes, err = tp.AcquireTicket(ctx, res.Email, signIn.Code)
+		}
+	}
+	if err != nil {
 		res.Error = "获取票据失败: " + err.Error()
 		r.emitLog("error", res.Error)
 		_ = os.WriteFile(filepath.Join(cfg.OutputDir, "last-ticket-error.txt"), []byte(res.Error), 0o600)
@@ -502,19 +524,30 @@ func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDi
 	r.setStage("发送邮箱验证码", res.Email, workerID)
 	sendStartedAt := time.Now()
 	sendErr := mm.SendCode(ctx, res.Email, ticketRes.Ticket)
-	for attempt := 1; attempt <= 2 && sendErr != nil; attempt++ {
+	for attempt := 1; attempt <= 3 && sendErr != nil; attempt++ {
 		needRetry := strings.Contains(sendErr.Error(), "1200063")
 		if !needRetry {
 			break
 		}
-		r.emitLog("info", fmt.Sprintf("[%s] 人机验证被拒，第 %d 次重取票据重试", res.Email, attempt))
+		r.emitLog("info", fmt.Sprintf("[%s] 人机验证被拒(1200063)，换出口重取票据，第 %d/3 次", res.Email, attempt))
 		if ctx.Err() != nil {
 			break
+		}
+		// 1200063 多半是出口 IP 被 reCAPTCHA 判负，换出口才有意义；
+		// 同一节点原地重取票据基本还是被拒。
+		if dialer != nil {
+			dialer.RotateSession()
+			time.Sleep(1500 * time.Millisecond)
 		}
 		ticket2, terr := tp.AcquireTicket(ctx, res.Email, signIn.Code)
 		if terr == nil && ticket2 != nil && strings.TrimSpace(ticket2.Ticket) != "" {
 			mm.SetCookies(ticket2.Cookies)
 			sendErr = mm.SendCode(ctx, res.Email, ticket2.Ticket)
+			continue
+		}
+		// 票据都拿不到，等于这个出口不可用，换个出口再来。
+		if terr != nil && isRecoverableNetworkError(terr) && attempt < 3 {
+			sendErr = fmt.Errorf("取票据失败: %w", terr)
 			continue
 		}
 		break
@@ -543,7 +576,9 @@ func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDi
 				},
 			}
 		}
-		verifyCode, err = PollHotmailCode(ctx, mailHTTP, hotmailAcc, sendStartedAt.Add(-90*time.Second), 90*time.Second)
+		// 轮询窗口给足：前面可能已经因为换出口重试过好几次，
+		// 90 秒窗口容易在邮件到达前就超时，然后误报"没收到验证码"。
+		verifyCode, err = PollHotmailCode(ctx, mailHTTP, hotmailAcc, sendStartedAt.Add(-120*time.Second), 180*time.Second)
 		if err != nil {
 			res.Error = err.Error()
 			r.emitLog("error", fmt.Sprintf("[%s] Hotmail 取码失败: %s", res.Email, res.Error))

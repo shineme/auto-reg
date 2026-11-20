@@ -26,7 +26,11 @@ func main() {
 	cursorPanel := flag.String("cursor-panel", "", "panel base url for cursor test")
 	cursorKey := flag.String("cursor-key", "", "panel key for cursor test")
 	cursorEmail := flag.String("cursor-email", "", "use a specific hotmail account for the cursor test")
+	cursorProxy := flag.String("cursor-proxy", "", "proxy used by the Cursor browser (empty = use config proxy)")
 	flag.Parse()
+	if *cursorProxy != "" {
+		cursorBrowserProxy = *cursorProxy
+	}
 
 	switch {
 	case *cursorBatch:
