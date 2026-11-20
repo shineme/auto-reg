@@ -7,6 +7,7 @@
 
   const FIELDS = [
     "panelBase", "panelKey", "panel2Base", "panel2Key", "mailMode", "count", "workers",
+    "platformMode", "cursorCount",
     "captchaDirect", "mailViaProxy", "signinAfterRegister", "timezoneId",
     "mailDomain", "mailPrefix", "imapHost", "imapPort", "imapUser", "imapPassword",
     "hotmailRaw", "hotmailPool", "hotmailPreflightWorkers",
@@ -147,7 +148,8 @@
   function refreshBadges() {
     const c = readForm();
     $("badgePanel").textContent = c.panel2Base ? "双面板分摊" : "单面板";
-    $("badgeTask").textContent = "目标 " + (c.count || 0) + " · " + (c.workers || 1) + " 路";
+    $("badgeTask").textContent = "目标 " + (c.count || 0) + " · " + (c.workers || 1) + " 路 · " +
+      (PLATFORM_LABEL[c.platformMode] || "仅 MiniMax");
     $("badgeMail").textContent = c.mailMode === "hotmail" ? "Hotmail Graph" : "域名邮箱 IMAP";
     $("badgeProxy").textContent = c.proxyPoolUse ? "节点池" : (c.proxyUrl ? "固定代理" : "直连");
   }
@@ -690,6 +692,8 @@
     { id: "panel2Base", title: "面板 2 地址", sec: "panel" },
     { id: "count", title: "目标成功数量", sec: "task" },
     { id: "workers", title: "并行线路数", sec: "task" },
+    { id: "platformMode", title: "运行平台", sec: "task" },
+    { id: "cursorCount", title: "Cursor 目标数量", sec: "task" },
     { id: "mailMode", title: "接码模式", sec: "task" },
     { id: "signinAfterRegister", title: "注册后自动签到", sec: "task" },
     { id: "hotmailPool", title: "号池文件路径", sec: "mail" },
@@ -819,8 +823,8 @@
         toast("已发送停止信号");
       } else if (id === "cursor-bind") {
         await app().SaveConfig(cfg);
-        await app().StartCursorBinding(cfg, cfg.count || 1);
-        toast("Cursor 绑定已启动", "ok");
+        await app().StartCursorBinding(cfg, cfg.cursorCount || cfg.count || 1);
+        toast("Cursor 绑定已启动，目标 " + (cfg.cursorCount || cfg.count || 1) + " 个", "ok");
       } else if (id === "cursor-stop") {
         await app().StopCursorBinding();
         toast("已发送停止信号");
@@ -905,6 +909,32 @@
     $("nodeDead").textContent = fmtInt(st.dead);
     const pct = st.total > 0 ? (st.alive / st.total) * 100 : 0;
     $("nodeMeter").style.width = pct.toFixed(1) + "%";
+  }
+
+  /* ==================== 运行平台状态 ==================== */
+  const PLATFORM_LABEL = { minimax: "仅 MiniMax", cursor: "仅 Cursor", both: "MiniMax + Cursor" };
+
+  function renderPlatform(st) {
+    if (!st) return;
+    const label = PLATFORM_LABEL[st.mode] || st.modeLabel || "—";
+    $("railPlatform").textContent = label +
+      (st.miniMaxRunning ? " · MiniMax 运行中" : "") +
+      (st.cursorRunning ? " · Cursor 运行中" : "");
+    const cp = st.cursorProgress || {};
+    if (st.cursorRunning || (cp.succeeded || 0) > 0) {
+      $("railCursor").textContent = "成功 " + fmtInt(cp.succeeded || 0) + " / " + fmtInt(cp.target || 0) +
+        (cp.failed ? " · 失败 " + fmtInt(cp.failed) : "") +
+        (cp.currentEmail ? " · " + cp.currentEmail : "");
+    } else {
+      $("railCursor").textContent = "未运行";
+    }
+  }
+
+  async function refreshPlatform() {
+    try {
+      const st = await app().GetPlatformStatus(readForm());
+      renderPlatform(st);
+    } catch (e) { /* ignore */ }
   }
 
 
@@ -1108,6 +1138,7 @@
       const lite = await app().GetProgressLite();
       renderSummary(lite);
     } catch (e) { /* ignore */ }
+    try { await refreshPlatform(); } catch (e) { /* ignore */ }
   }
 
   async function init() {
@@ -1136,6 +1167,7 @@
       try { renderPool(await app().GetHotmailStats(readForm())); } catch (e) { /* ignore */ }
       try { renderNodes(await app().GetProxyPoolStats(readForm())); } catch (e) { /* ignore */ }
     }, 20000);
+    setInterval(refreshPlatform, 5000);
   }
 
   document.addEventListener("DOMContentLoaded", init);

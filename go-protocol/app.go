@@ -85,6 +85,10 @@ func (a *App) StartSupervised(cfg Config) error {
 	if err := SaveConfig(cfg); err != nil {
 		return err
 	}
+	if !cfg.RunMiniMax() {
+		// 仅 Cursor 模式：不启动 MiniMax 监督循环，只跑绑定
+		return a.StartCursorBinding(cfg, cfg.CursorCount)
+	}
 	a.supM.Lock()
 	if a.supRunning {
 		a.supM.Unlock()
@@ -96,6 +100,11 @@ func (a *App) StartSupervised(cfg Config) error {
 	a.supM.Unlock()
 
 	go a.runSupervisedLoop(cfg, stopCh)
+	if cfg.RunCursor() {
+		if err := a.StartCursorBinding(cfg, cfg.CursorCount); err != nil {
+			a.emitBatchLog("error", "[cursor] 绑定任务启动失败: "+err.Error())
+		}
+	}
 	return nil
 }
 
@@ -179,6 +188,7 @@ func stopWait(stopCh <-chan struct{}, d time.Duration) bool {
 // StopSupervised 停止监督批量。
 func (a *App) StopSupervised() {
 	a.stopSupervised()
+	a.StopCursorBinding()
 }
 
 func (a *App) stopSupervised() {
@@ -545,11 +555,24 @@ func (a *App) StartBatch(cfg Config) error {
 	if err := SaveConfig(cfg); err != nil {
 		return err
 	}
-	return a.runner.Start(cfg)
+	if !cfg.RunMiniMax() {
+		// 仅 Cursor 模式：只起绑定任务
+		return a.StartCursorBinding(cfg, cfg.CursorCount)
+	}
+	if err := a.runner.Start(cfg); err != nil {
+		return err
+	}
+	if cfg.RunCursor() {
+		if err := a.StartCursorBinding(cfg, cfg.CursorCount); err != nil {
+			a.emitBatchLog("error", "[cursor] 绑定任务启动失败: "+err.Error())
+		}
+	}
+	return nil
 }
 
 func (a *App) StopBatch() {
 	a.runner.Stop()
+	a.StopCursorBinding()
 }
 
 // CheckinAll 对已保存凭据的账号批量补签（每日一次）。

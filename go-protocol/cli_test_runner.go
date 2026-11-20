@@ -12,6 +12,12 @@ import (
 	"time"
 )
 
+// CLI 运行平台覆盖（-platform / -cursor-count）。
+var (
+	cliPlatform   string
+	cliCursorCount int
+)
+
 type checkinCredential struct {
 	Email        string `json:"email"`
 	UserID       string `json:"userID"`
@@ -188,6 +194,12 @@ func loadCLIConfig() Config {
 				}
 			}
 		}
+	}
+	if cliPlatform != "" {
+		cfg.PlatformMode = cliPlatform
+	}
+	if cliCursorCount > 0 {
+		cfg.CursorCount = cliCursorCount
 	}
 	return cfg
 }

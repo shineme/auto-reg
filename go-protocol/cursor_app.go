@@ -11,9 +11,72 @@ import (
 
 // cursorRunState 记录 Cursor 绑定任务的状态。
 var cursorRunState struct {
-	mu      sync.Mutex
-	running bool
-	cancel  context.CancelFunc
+	mu            sync.Mutex
+	running       bool
+	cancel        context.CancelFunc
+	target        int
+	succeeded     int
+	failed        int
+	currentEmail  string
+	updatedAt     string
+	lastPanelUser string
+}
+
+// CursorProgress 是 Cursor 绑定任务的进度快照。
+type CursorProgress struct {
+	Target      int    `json:"target"`
+	Succeeded   int    `json:"succeeded"`
+	Failed      int    `json:"failed"`
+	CurrentMail string `json:"currentEmail"`
+	Running     bool   `json:"running"`
+	UpdatedAt   string `json:"updatedAt"`
+	LastPanel   string `json:"lastPanelUser"`
+}
+
+// GetCursorProgress 返回 Cursor 绑定任务进度。
+func (a *App) GetCursorProgress() CursorProgress {
+	cursorRunState.mu.Lock()
+	defer cursorRunState.mu.Unlock()
+	return CursorProgress{
+		Target:      cursorRunState.target,
+		Succeeded:   cursorRunState.succeeded,
+		Failed:      cursorRunState.failed,
+		CurrentMail: cursorRunState.currentEmail,
+		Running:     cursorRunState.running,
+		UpdatedAt:   cursorRunState.updatedAt,
+		LastPanel:   cursorRunState.lastPanelUser,
+	}
+}
+
+// PlatformStatus 汇总当前任务平台与运行状态（前端用来显示"现在在跑什么"）。
+type PlatformStatus struct {
+	Mode           string         `json:"mode"`
+	ModeLabel      string         `json:"modeLabel"`
+	MiniMax        bool           `json:"miniMax"`
+	Cursor         bool           `json:"cursor"`
+	MiniMaxRunning bool           `json:"miniMaxRunning"`
+	Supervised     bool           `json:"supervised"`
+	CursorRunning  bool           `json:"cursorRunning"`
+	CursorProgress CursorProgress `json:"cursorProgress"`
+}
+
+// GetPlatformStatus 返回当前运行平台与各自运行状态。
+func (a *App) GetPlatformStatus(cfg Config) PlatformStatus {
+	cfg.applyDefaults()
+	a.supM.Lock()
+	sup := a.supRunning
+	a.supM.Unlock()
+	cp := a.GetCursorProgress()
+	return PlatformStatus{
+		Mode:           normalizePlatformMode(cfg.PlatformMode),
+		ModeLabel:      cfg.PlatformModeLabel(),
+		MiniMax:        cfg.RunMiniMax(),
+		Cursor:         cfg.RunCursor(),
+		MiniMaxRunning: a.runner.IsRunning(),
+		Supervised:     sup,
+		CursorRunning:  cp.Running,
+		CursorProgress: cp,
+	}
 }
 
 // StopCursorBinding 停止 Cursor 绑定任务。
@@ -47,6 +110,11 @@ func (a *App) StartCursorBinding(cfg Config, count int) error {
 	ctx, cancel := context.WithCancel(base)
 	cursorRunState.cancel = cancel
 	cursorRunState.running = true
+	cursorRunState.target = count
+	cursorRunState.succeeded = 0
+	cursorRunState.failed = 0
+	cursorRunState.currentEmail = ""
+	cursorRunState.updatedAt = time.Now().Format("15:04:05")
 	cursorRunState.mu.Unlock()
 	go a.runCursorBinding(ctx, cfg, count)
 	return nil
@@ -117,6 +185,10 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 			a.emitBatchLog("error", "[cursor] 号池取号失败: "+cerr.Error())
 			return
 		}
+		cursorRunState.mu.Lock()
+		cursorRunState.currentEmail = acc.Email
+		cursorRunState.updatedAt = time.Now().Format("15:04:05")
+		cursorRunState.mu.Unlock()
 		flow := &CursorFlow{
 			Panel:      panel,
 			ChromePath: cfg.ChromePath,
@@ -133,10 +205,19 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 		})
 		if rerr != nil {
 			fail++
+			cursorRunState.mu.Lock()
+			cursorRunState.failed = fail
+			cursorRunState.updatedAt = time.Now().Format("15:04:05")
+			cursorRunState.mu.Unlock()
 			store.FinalizeFor(PlatformCursor, idx, acc.Email, "available", rerr.Error(), "")
 			a.emitBatchLog("error", "["+acc.Email+"] "+rerr.Error())
 		} else {
 			ok++
+			cursorRunState.mu.Lock()
+			cursorRunState.succeeded = ok
+			cursorRunState.lastPanelUser = res.User
+			cursorRunState.updatedAt = time.Now().Format("15:04:05")
+			cursorRunState.mu.Unlock()
 			store.FinalizeFor(PlatformCursor, idx, acc.Email, "used", "", acc.RefreshToken)
 			store.MarkPlatformUsed(PlatformCursor, idx, acc.Email, res.User, res.SignInID)
 			a.emitBatchLog("info", fmt.Sprintf("[cursor] 成功 %d/%d：%s -> 面板账号 %s", ok, count, acc.Email, res.User))

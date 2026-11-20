@@ -40,6 +40,8 @@
           <div class="meter" style="margin-top:10px;"><i id="railMeter" style="width:0%"></i></div>
           <div class="stat-line" style="margin-top:8px;"><span class="lbl">当前阶段</span><span class="val" id="railStage">待机</span></div>
           <div class="stat-line"><span class="lbl">当前账号</span><span class="val" id="railEmail">—</span></div>
+          <div class="stat-line" style="margin-top:10px;"><span class="lbl">运行平台</span><span class="val" id="railPlatform">仅 MiniMax</span></div>
+          <div class="stat-line"><span class="lbl">Cursor 进度</span><span class="val" id="railCursor">—</span></div>
         </section>
 
         <section class="card">
@@ -257,6 +259,15 @@
             </div>
             <div class="field"><label for="count">目标成功数量</label><input id="count" type="number" min="1" max="5000" /></div>
             <div class="field"><label for="workers">并行线路数 <em>1-16</em></label><input id="workers" type="number" min="1" max="16" /></div>
+          <div class="field">
+            <label for="platformMode">运行平台 <em>决定这轮跑哪个</em></label>
+            <select id="platformMode">
+              <option value="minimax">仅 MiniMax 注册</option>
+              <option value="cursor">仅 Cursor 绑定</option>
+              <option value="both">MiniMax + Cursor 同时跑</option>
+            </select>
+          </div>
+          <div class="field"><label for="cursorCount">Cursor 目标数量</label><input id="cursorCount" type="number" min="1" max="5000" /></div>
             <div class="field"><label for="timezoneId">签到时区 <em>timezone_id</em></label><input id="timezoneId" placeholder="Asia/Shanghai" spellcheck="false" /></div>
           </div>
           <label class="switch"><input type="checkbox" id="captchaDirect" /><span class="track"></span><span class="sw-text">验证码页面直连<em>代理不稳时勾选</em></span></label>

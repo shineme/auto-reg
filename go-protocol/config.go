@@ -53,6 +53,10 @@ type Config struct {
 	ExternalTicketURL       string   `json:"externalTicketUrl"`
 	Count                   int      `json:"count"`
 	Workers                 int      `json:"workers"`
+	// PlatformMode: minimax / cursor / both —— 决定批量任务跑哪个平台。
+	PlatformMode string `json:"platformMode"`
+	// CursorCount: cursor 模式（或 both 模式）下目标绑定成功的 Cursor 账号数。
+	CursorCount int `json:"cursorCount"`
 	CaptchaDirect           bool     `json:"captchaDirect"`
 	MailViaProxy            bool     `json:"mailViaProxy"`
 	SigninAfterRegister     bool     `json:"signinAfterRegister"`
@@ -224,6 +228,10 @@ func (cfg *Config) applyDefaults() {
 	}
 	cfg.ProxyPoolFile = strings.TrimSpace(cfg.ProxyPoolFile)
 	cfg.ProxySubscriptionURL = normalizeSubscriptionURLs(cfg.ProxySubscriptionURL)
+	cfg.PlatformMode = normalizePlatformMode(cfg.PlatformMode)
+	if cfg.CursorCount <= 0 {
+		cfg.CursorCount = 10
+	}
 	if cfg.ProxyPoolWorkers <= 0 {
 		cfg.ProxyPoolWorkers = 16
 	}
@@ -241,6 +249,42 @@ func (cfg *Config) applyDefaults() {
 // normalizeSubscriptionURLs 允许同时填多个订阅地址（换行/逗号/分号分隔），统一存成多行文本。
 func normalizeSubscriptionURLs(raw string) string {
 	return strings.Join(splitSubscriptionURLs(raw), "\n")
+}
+
+// normalizePlatformMode 归一化运行平台模式：minimax / cursor / both。
+func normalizePlatformMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "cursor":
+		return "cursor"
+	case "both":
+		return "both"
+	default:
+		return "minimax"
+	}
+}
+
+// RunMiniMax 是否需要跑 MiniMax 注册任务。
+func (cfg Config) RunMiniMax() bool {
+	m := normalizePlatformMode(cfg.PlatformMode)
+	return m == "minimax" || m == "both"
+}
+
+// RunCursor 是否需要跑 Cursor 绑定任务。
+func (cfg Config) RunCursor() bool {
+	m := normalizePlatformMode(cfg.PlatformMode)
+	return m == "cursor" || m == "both"
+}
+
+// PlatformModeLabel 返回运行平台的中文标签。
+func (cfg Config) PlatformModeLabel() string {
+	switch normalizePlatformMode(cfg.PlatformMode) {
+	case "cursor":
+		return "仅 Cursor"
+	case "both":
+		return "MiniMax + Cursor"
+	default:
+		return "仅 MiniMax"
+	}
 }
 
 // splitSubscriptionURLs 拆分多个订阅地址并去重（保序）。

@@ -27,9 +27,17 @@ func main() {
 	cursorKey := flag.String("cursor-key", "", "panel key for cursor test")
 	cursorEmail := flag.String("cursor-email", "", "use a specific hotmail account for the cursor test")
 	cursorProxy := flag.String("cursor-proxy", "", "proxy used by the Cursor browser (empty = use config proxy)")
+	platform := flag.String("platform", "", "run platform: minimax | cursor | both")
+	cursorTargetCount := flag.Int("cursor-target", 0, "cursor target count when -platform=cursor")
 	flag.Parse()
 	if *cursorProxy != "" {
 		cursorBrowserProxy = *cursorProxy
+	}
+	if *platform != "" {
+		cliPlatform = *platform
+	}
+	if *cursorTargetCount > 0 {
+		cliCursorCount = *cursorTargetCount
 	}
 
 	switch {
@@ -46,8 +54,16 @@ func main() {
 	case *mailScan:
 		runCLIMailScanFull(*mailScanWorkers, *mailScanLimit)
 	case *supervised:
+		if cliPlatform == "cursor" {
+			runCLICursorBatch("", "", cliCursorCount)
+			return
+		}
 		runCLISupervised(*count, *workers)
 	case *batch:
+		if cliPlatform == "cursor" {
+			runCLICursorBatch("", "", cliCursorCount)
+			return
+		}
 		runCLIBatch(*count, *workers)
 	case *testOne:
 		runCLITestOne()

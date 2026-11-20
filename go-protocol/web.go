@@ -185,6 +185,22 @@ func (s *WebServer) dispatch(name string, args []json.RawMessage) (any, error) {
 	case "StopBatch":
 		s.app.StopBatch()
 		return nil, nil
+	case "StartCursorBinding":
+		count := 0
+		if len(args) > 1 {
+			_ = json.Unmarshal(args[1], &count)
+		}
+		if err := s.app.StartCursorBinding(cfg, count); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	case "StopCursorBinding":
+		s.app.StopCursorBinding()
+		return nil, nil
+	case "GetCursorProgress":
+		return s.app.GetCursorProgress(), nil
+	case "GetPlatformStatus":
+		return s.app.GetPlatformStatus(cfg), nil
 	}
 	return nil, fmt.Errorf("unknown api: %s", name)
 }

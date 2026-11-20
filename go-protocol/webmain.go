@@ -68,6 +68,10 @@ func buildBridge(token string) string {
     GetResultsPage: function (c, o, l, q, s) { return api("GetResultsPage", [c, o, l, q, s]); },
     StartBatch: function (c) { return api("StartBatch", [c]); },
     StopBatch: function () { return api("StopBatch"); },
+	StartCursorBinding: function (c, n) { return api("StartCursorBinding", [c, n || 0]); },
+	StopCursorBinding: function () { return api("StopCursorBinding"); },
+	GetCursorProgress: function () { return api("GetCursorProgress"); },
+	GetPlatformStatus: function (c) { return api("GetPlatformStatus", [c]); },
     ClearHistory: function (c) { return api("ClearHistory", [c]); },
     StartSupervised: function (c) { return api("StartSupervised", [c]); },
     StopSupervised: function () { return api("StopSupervised"); }

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import urllib.parse
 
 import yaml
 
@@ -29,6 +30,13 @@ UNIT_FILE = "/etc/systemd/system/minimax-web.service"
 # 订阅里仅 5 个，暂不接入以免拖累整体配置。
 SUPPORTED = ("ss", "vmess", "vless", "trojan", "hysteria2", "anytls",
              "http", "https")
+
+# 额外的 VLESS 链接订阅（多条订阅合并进同一个 sing-box 节点池）
+VLESS_SUB_URL = os.environ.get(
+    "MINIMAX_VLESS_SUB_URL",
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/"
+    "refs/heads/main/BLACK_VLESS_RUS_mobile.txt")
+VLESS_PATH = "/opt/minimax/vless-sub.txt"
 
 
 def log(msg):
@@ -51,7 +59,10 @@ def tool_token():
         with open(UNIT_FILE, encoding="utf-8") as fh:
             for line in fh:
                 if "-token" in line:
-                    return line.strip().split()[-1]
+                    parts = line.strip().split()
+                    if "-token" in parts:
+                        return parts[parts.index("-token") + 1]
+                    return parts[-1]
     except Exception:
         pass
     return ""
@@ -202,10 +213,14 @@ def build_outbound(p, tag):
     return ob
 
 
-def build_config(doc):
+def build_config(doc, vless=None):
     inbounds, outbounds, rules, manifest = [], [], [], []
     idx = 0
-    for p in (doc.get("proxies") or []):
+    proxies = list(doc.get("proxies") or [])
+    if vless is None:
+        vless = load_vless_proxies()
+    proxies.extend(vless)
+    for p in proxies:
         if p.get("type") not in SUPPORTED or not p.get("server") or not p.get("port"):
             continue
         port = BASE_PORT + idx
@@ -236,6 +251,98 @@ def build_config(doc):
         "route": {"rules": rules, "final": outbounds[0]["tag"]},
     }
     return cfg, manifest
+
+
+def load_vless_proxies():
+    """读取 VLESS 链接订阅，转成 Clash 风格的 proxy 字典（拉取失败不阻断刷新）。"""
+    try:
+        req = urllib.request.Request(
+            VLESS_SUB_URL, headers={"User-Agent": "Clash/v1.18.0"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = resp.read()
+        with open(VLESS_PATH, "wb") as fh:
+            fh.write(data)
+        proxies = parse_vless_links(data.decode("utf-8", "replace"))
+        log("0) VLESS 订阅拉取成功：%d 条" % len(proxies))
+        return proxies
+    except Exception as exc:
+        log("0) VLESS 订阅拉取失败（忽略）：%s" % exc)
+        return []
+
+
+def parse_vless_links(text):
+    """把 vless://uuid@host:port?type=ws&path=...&security=tls#name 解析成 proxy 字典。"""
+    out = []
+    seen = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith("vless://"):
+            continue
+        try:
+            rest = line[len("vless://"):]
+            frag = ""
+            if "#" in rest:
+                rest, frag = rest.split("#", 1)
+            query = ""
+            if "?" in rest:
+                rest, query = rest.split("?", 1)
+            if "@" not in rest:
+                continue
+            userinfo, hostport = rest.rsplit("@", 1)
+            host, _, port = hostport.partition(":")
+            if not host or not port.isdigit():
+                continue
+            params = urllib.parse.parse_qs(query)
+
+            def one(key, default=""):
+                vals = params.get(key) or []
+                return vals[0] if vals else default
+
+            net = (one("type", "tcp") or "tcp").lower()
+            if net not in ("tcp", "ws", "grpc", "h2", "http"):
+                net = "tcp"
+            proxy = {
+                "type": "vless",
+                "name": urllib.parse.unquote(frag) or ("%s:%s" % (host, port)),
+                "server": host,
+                "port": int(port),
+                "uuid": userinfo,
+                "network": net,
+            }
+            security = (one("security", "none") or "none").lower()
+            if security in ("tls", "reality"):
+                proxy["tls"] = True
+                proxy["skip-cert-verify"] = True
+                sni = one("sni") or one("host")
+                if sni:
+                    proxy["sni"] = sni
+            fp = one("fp")
+            if fp:
+                proxy["client-fingerprint"] = fp
+            alpn = one("alpn")
+            if alpn:
+                proxy["alpn"] = [a for a in alpn.split(",") if a]
+            if net == "ws":
+                path = one("path", "/")
+                # 订阅里路径常被二次编码，解两次还原成真实路径
+                for _ in range(2):
+                    path = urllib.parse.unquote(path)
+                host_hdr = one("host")
+                opts = {"path": path or "/"}
+                if host_hdr:
+                    opts["headers"] = {"Host": host_hdr}
+                proxy["ws-opts"] = opts
+            elif net == "grpc":
+                proxy["grpc-opts"] = {
+                    "grpc-service-name": one("serviceName") or one("servicename")}
+            key = (proxy["server"], proxy["port"], proxy["uuid"])
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(proxy)
+        except Exception:
+            continue
+    return out
 
 
 def apply_config(cfg, manifest):
@@ -309,9 +416,13 @@ def refresh_tool(manifest):
 
 def main():
     doc = fetch_subscription()
-    cfg, manifest = build_config(doc)
+    vless = load_vless_proxies()
+    cfg, manifest = build_config(doc, vless)
     if not apply_config(cfg, manifest):
-        return 1
+        # 含 VLESS 节点时若整份配置校验不过，退回仅 Clash 节点
+        cfg, manifest = build_config(doc, [])
+        if not apply_config(cfg, manifest):
+            return 1
     try:
         refresh_tool(manifest)
     except Exception as exc:
