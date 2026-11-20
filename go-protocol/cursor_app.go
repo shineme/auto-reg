@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -197,15 +198,39 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 	}
 	poolPath := cfg.HotmailPool
 	store := NewHotmailPoolStore(poolPath)
-	panel, err := NewPanelClient(panelBase, panelKey, dialer, cfg.ProxyDirectHosts)
-	if err == nil {
-		err = panel.Login(ctx)
+	// 面板可以配两个，账号在两个面板之间轮流绑定：user_code / 授权链接互不干扰。
+	panels := make([]*PanelClient, 0, 2)
+	addPanel := func(base, key, label string) {
+		base = strings.TrimSpace(base)
+		key = strings.TrimSpace(key)
+		if base == "" || key == "" {
+			return
+		}
+		for _, p := range panels {
+			if p.baseURL == base {
+				return
+			}
+		}
+		pc, err := NewPanelClient(base, key, dialer, cfg.ProxyDirectHosts)
+		if err != nil {
+			a.emitBatchLog("error", "[cursor] 面板 "+label+" 初始化失败: "+err.Error())
+			return
+		}
+		if err := pc.Login(ctx); err != nil {
+			a.emitBatchLog("error", "[cursor] 面板 "+label+" 登录失败: "+err.Error())
+			return
+		}
+		panels = append(panels, pc)
+		a.emitBatchLog("info", "[cursor] 面板 "+label+" 已就绪: "+base)
 	}
-	if err != nil {
-		a.emitBatchLog("error", "[cursor] 面板登录失败: "+err.Error())
+	addPanel(cfg.PanelBase, cfg.PanelKey, "1")
+	addPanel(cfg.Panel2Base, cfg.Panel2Key, "2")
+	if len(panels) == 0 {
+		a.emitBatchLog("error", "[cursor] 没有可用面板")
 		return
 	}
 	mailClient := &http.Client{Timeout: 30 * time.Second}
+	turn := 0
 	for ok < count {
 		if ctx.Err() != nil {
 			return
@@ -219,6 +244,9 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 		cursorRunState.currentEmail = acc.Email
 		cursorRunState.updatedAt = time.Now().Format("15:04:05")
 		cursorRunState.mu.Unlock()
+		panel := panels[turn%len(panels)]
+		turn++
+		a.emitBatchLog("info", "["+acc.Email+"] 分配到面板: "+panel.baseURL)
 		// 每个账号换一个出口 IP（节点池模式下换节点，固定代理模式下换会话）。
 		if dialer != nil && len(poolSpecs) > 0 {
 			dialer.RotateSession()
@@ -240,11 +268,30 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 				return PollHotmailLink(ctx, mailClient, acc, notBefore, 3*time.Minute, "cursor-confirm")
 			},
 		}
-		res, rerr := flow.Execute(ctx, acc.Email, func(ctx context.Context, notBefore time.Time) (string, error) {
-			return PollHotmailCodeFor(ctx, mailClient, acc, notBefore, 3*time.Minute, "cursor")
-		}, func(step string) {
-			a.emitBatchLog("info", "["+acc.Email+"] "+step)
-		})
+		// 单个账号最多试 2 次：第一次失败多半是出口 IP 不行，换节点/换会话再来一次。
+		var res *CursorResult
+		var rerr error
+		for attempt := 1; attempt <= 2; attempt++ {
+			res, rerr = flow.Execute(ctx, acc.Email, func(ctx context.Context, notBefore time.Time) (string, error) {
+				return PollHotmailCodeFor(ctx, mailClient, acc, notBefore, 3*time.Minute, "cursor")
+			}, func(step string) {
+				a.emitBatchLog("info", "["+acc.Email+"] "+step)
+			})
+			if rerr == nil {
+				break
+			}
+			if attempt == 2 {
+				break
+			}
+			a.emitBatchLog("info", "["+acc.Email+"] 第 1 次失败（"+rerr.Error()+"），换出口 IP 重试")
+			if dialer != nil {
+				dialer.RotateSession()
+			}
+			if browserDialer != nil {
+				browserDialer.RotateSession()
+			}
+			time.Sleep(3 * time.Second)
+		}
 		if rerr != nil {
 			fail++
 			cursorRunState.mu.Lock()

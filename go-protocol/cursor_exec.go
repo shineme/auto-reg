@@ -3,9 +3,25 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// cursorCaptchaWaitLimit 人机验证最长等待时间。
+// 服务器（无桌面）默认 90 秒就放弃该账号换出口；本地人工点击可用 MINIMAX_CURSOR_MANUAL=1 无限等待。
+func cursorCaptchaWaitLimit() time.Duration {
+	if cursorManualHuman {
+		return 24 * time.Hour
+	}
+	if v := os.Getenv("MINIMAX_CURSOR_CAPTCHA_WAIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 90 * time.Second
+}
 
 // Execute 跑完整 Cursor 授权流程：deep-control 页面、邮箱登录页、验证码、密码，面板落库。
 func (f *CursorFlow) Execute(ctx context.Context, email string, fetchCode func(ctx context.Context, notBefore time.Time) (string, error), onStep func(string)) (*CursorResult, error) {
@@ -38,6 +54,7 @@ func (f *CursorFlow) Execute(ctx context.Context, email string, fetchCode func(c
 	switchTries := 0
 	humanHinted := false
 	lastHumanHint := time.Time{}
+	humanSince := time.Time{}
 	approveTries := 0
 	linkTries := 0
 	confirmLink := ""
@@ -148,6 +165,14 @@ func (f *CursorFlow) Execute(ctx context.Context, email string, fetchCode func(c
 		}
 				// 人机验证：程序不代过验证，由用户在浏览器窗口自行点击完成。
 		if cursorHumanCheckText(st.Text) {
+			if humanSince.IsZero() {
+				humanSince = time.Now()
+			}
+			// 服务器上没有桌面可点，超时就放弃该账号，换出口继续下一个。
+			if !cursorManualHuman && time.Since(humanSince) > cursorCaptchaWaitLimit() {
+				return nil, fmt.Errorf("人机验证等待超时（%.0fs，服务器端无法人工点击），已跳过该账号",
+					cursorCaptchaWaitLimit().Seconds())
+			}
 			if !humanHinted || time.Since(lastHumanHint) > 15*time.Second {
 				lastHumanHint = time.Now()
 				humanHinted = true
