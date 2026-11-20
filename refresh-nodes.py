@@ -25,7 +25,10 @@ CFG_PATH = "/opt/minimax/singbox-config.json"
 MANIFEST_PATH = "/opt/minimax/singbox-nodes.json"
 TOOL_URL = "http://127.0.0.1:8090"
 UNIT_FILE = "/etc/systemd/system/minimax-web.service"
-SUPPORTED = ("ss", "vmess", "vless", "trojan", "hysteria2")
+# wireguard 在 sing-box 1.14 已迁到 endpoint 类型且需要 TUN/系统接口，
+# 订阅里仅 5 个，暂不接入以免拖累整体配置。
+SUPPORTED = ("ss", "vmess", "vless", "trojan", "hysteria2", "anytls",
+             "http", "https")
 
 
 def log(msg):
@@ -127,8 +130,25 @@ def transport_block(p):
 
 def build_outbound(p, tag):
     t = p.get("type")
+    if t in ("http", "https"):
+        # singlebox 的转换器节点：type=http + tls=true 走 TLS 到转换器再转发
+        ob = {
+            "type": "http",
+            "tag": tag,
+            "server": p["server"],
+            "server_port": int(p["port"]),
+        }
+        if t == "https" or p.get("tls"):
+            ob["tls"] = {"enabled": True, "insecure": bool(p.get("skip-cert-verify"))}
+            sni = p.get("sni")
+            if sni:
+                ob["tls"]["server_name"] = sni
+        if p.get("username"):
+            ob["username"] = p["username"]
+            ob[PW] = p.get(PW) or ""
+        return ob
     ob = {
-        "type": "shadowsocks" if t == "ss" else t,
+        "type": {"ss": "shadowsocks", "ssr": "shadowsocksr", "hy2": "hysteria2"}.get(t, t),
         "tag": tag,
         "server": p["server"],
         "server_port": int(p["port"]),
@@ -172,6 +192,11 @@ def build_outbound(p, tag):
             ob["up_mbps"] = int(p["up"])
         if p.get("down"):
             ob["down_mbps"] = int(p["down"])
+    elif t == "anytls":
+        ob[PW] = p.get(PW) or ""
+        tb = tls_block(p)
+        # anytls 必须开启 TLS
+        ob["tls"] = tb or {"enabled": True, "insecure": True}
     else:
         return None
     return ob

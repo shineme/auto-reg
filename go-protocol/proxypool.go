@@ -42,6 +42,8 @@ type ProxyNodeInfo struct {
 	Error    string `json:"error,omitempty"`
 	// Dial 记录实测可用的拨号方式：http / https / socks5。
 	Dial string `json:"dial,omitempty"`
+	// Forward 标记该节点是正向代理（absolute-form），不支持 CONNECT 隧道。
+	Forward bool `json:"forward,omitempty"`
 }
 
 // ProxyPool 是本地保存的节点池文件。
@@ -373,6 +375,14 @@ func CheckProxyNode(ctx context.Context, node ProxyNodeInfo, checkURL string) Pr
 func exitIPViaNode(ctx context.Context, node ProxyNodeInfo, checkURL string) (string, string, error) {
 	var detail []string
 	for _, mode := range nodeDialModes(node) {
+		if mode == "forward" {
+			ip, err := exitIPViaForward(ctx, node, checkURL)
+			if err == nil {
+				return ip, mode, nil
+			}
+			detail = append(detail, "forward: "+err.Error())
+			continue
+		}
 		ip, err := exitIPViaNodeMode(ctx, node, mode, checkURL)
 		if err == nil {
 			return ip, mode, nil
@@ -388,6 +398,9 @@ func nodeDialModes(node ProxyNodeInfo) []string {
 	switch {
 	case node.Dial != "":
 		preferred = node.Dial
+	case node.Forward:
+		// 正向代理模式（absolute-form 请求），非 CONNECT 隧道
+		preferred = "forward"
 	case node.Type == "socks5" || node.Type == "socks5h":
 		preferred = "socks5"
 	case node.TLS:
@@ -396,12 +409,48 @@ func nodeDialModes(node ProxyNodeInfo) []string {
 		preferred = "http"
 	}
 	all := []string{preferred}
-	for _, m := range []string{"https", "http", "socks5"} {
+	for _, m := range []string{"https", "http", "socks5", "forward"} {
 		if m != preferred {
 			all = append(all, m)
 		}
 	}
 	return all
+}
+
+// exitIPViaForward 用正向代理模式（absolute-form）取出口 IP。
+// 订阅里 https:// 开头的节点属于这类：CONNECT 不支持，只能用 absolute-form。
+func exitIPViaForward(ctx context.Context, node ProxyNodeInfo, checkURL string) (string, error) {
+	hostport := net.JoinHostPort(node.Server, strconv.Itoa(node.Port))
+	dialer := &net.Dialer{Timeout: 12 * time.Second}
+	var conn net.Conn
+	var err error
+	if node.TLS {
+		conn, err = tls.DialWithDialer(dialer, "tcp", hostport,
+			&tls.Config{InsecureSkipVerify: true, ServerName: node.SNI})
+	} else {
+		conn, err = dialer.DialContext(ctx, "tcp", hostport)
+	}
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(20 * time.Second))
+	targetHost := urlScheme(checkURL) + "://" + checkHostPort(checkURL)
+	req := "GET " + targetHost + " HTTP/1.1\r\nHost: " + checkHostPort(checkURL) +
+		"\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nConnection: close\r\n\r\n"
+	if _, err := conn.Write([]byte(req)); err != nil {
+		return "", err
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodGet})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("正向代理返回 %d", resp.StatusCode)
+	}
+	return firstIP(string(body)), nil
 }
 
 func exitIPViaNodeMode(ctx context.Context, node ProxyNodeInfo, mode, checkURL string) (string, error) {
@@ -410,6 +459,16 @@ func exitIPViaNodeMode(ctx context.Context, node ProxyNodeInfo, mode, checkURL s
 		return "", err
 	}
 	defer conn.Close()
+	// CONNECT 隧道内若目标是 https，需要再做一次 TLS 握手（此前缺失导致
+	// 订阅里的 HTTPS 代理节点被误判为不可用）。
+	if strings.EqualFold(urlScheme(checkURL), "https") {
+		target := hostOnly(checkHostPort(checkURL))
+		tlsConn := tls.Client(conn, &tls.Config{InsecureSkipVerify: true, ServerName: target})
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			return "", fmt.Errorf("隧道内 TLS 握手失败: %w", err)
+		}
+		conn = tlsConn
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)
 	if err != nil {
 		return "", err
@@ -427,6 +486,15 @@ func exitIPViaNodeMode(ctx context.Context, node ProxyNodeInfo, mode, checkURL s
 		return "", fmt.Errorf("检测返回 %d", resp.StatusCode)
 	}
 	return firstIP(string(body)), nil
+}
+
+// urlScheme 返回 URL 的协议部分。
+func urlScheme(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "https"
+	}
+	return u.Scheme
 }
 
 var ipRe = regexp.MustCompile(`(?:\d{1,3}\.){3}\d{1,3}`)
