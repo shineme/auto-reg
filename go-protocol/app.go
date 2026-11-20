@@ -238,6 +238,24 @@ func (a *App) ImportHotmailFile(cfg Config, path string) (HotmailPoolStats, erro
 	return stats, nil
 }
 
+// ImportHotmailText 直接导入前端读取的大文本内容（桌面版文件导入走这条通道，
+// 不依赖服务端 /api/upload，避免大文件粘贴被截断）。
+func (a *App) ImportHotmailText(cfg Config, raw string) (HotmailPoolStats, error) {
+	cfg.applyDefaults()
+	raw = strings.TrimPrefix(raw, "\ufeff")
+	if strings.TrimSpace(raw) == "" {
+		return HotmailPoolStats{}, errors.New("导入文本为空")
+	}
+	stats, added, err := ImportHotmailRaw(cfg.HotmailPool, raw)
+	if err != nil {
+		return stats, err
+	}
+	lines := strings.Count(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	a.emitBatchLog("info", fmt.Sprintf("导入 Hotmail 完成：文本 %d 行，新增 %d，总计 %d，可用 %d",
+		lines+1, added, stats.Total, stats.Available))
+	return stats, nil
+}
+
 func (a *App) GetHotmailStats(cfg Config) (HotmailPoolStats, error) {
 	cfg.applyDefaults()
 	p, err := LoadHotmailPool(cfg.HotmailPool)

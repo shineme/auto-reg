@@ -50,6 +50,7 @@ func buildBridge(token string) string {
     TestPanel: function (c) { return api("TestPanel", [c]); },
     ImportHotmail: function (c) { return api("ImportHotmail", [c]); },
     ImportHotmailFile: function (c, p) { return api("ImportHotmailFile", [c, p]); },
+    ImportHotmailText: function (c, t) { return api("ImportHotmailText", [c, t]); },
     GetHotmailStats: function (c) { return api("GetHotmailStats", [c]); },
 	ImportProxySubscription: function (c) { return api("ImportProxySubscription", [c]); },
 	CheckProxyPool: function (c) { return api("CheckProxyPool", [c]); },

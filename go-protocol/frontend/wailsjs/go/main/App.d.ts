@@ -20,6 +20,8 @@ export function ImportHotmail(arg1:main.Config):Promise<main.HotmailPoolStats>;
 
 export function ImportHotmailFile(arg1:main.Config,arg2:string):Promise<main.HotmailPoolStats>;
 
+export function ImportHotmailText(arg1:main.Config,arg2:string):Promise<main.HotmailPoolStats>;
+
 export function ImportProxySubscription(arg1:main.Config):Promise<main.ProxyPoolStats>;
 
 export function MailInboxView(arg1:main.Config,arg2:string):Promise<main.MailInboxView>;

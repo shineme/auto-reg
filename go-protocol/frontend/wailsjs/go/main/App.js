@@ -38,6 +38,10 @@ export function ImportHotmailFile(arg1, arg2) {
   return window['go']['main']['App']['ImportHotmailFile'](arg1, arg2);
 }
 
+export function ImportHotmailText(arg1, arg2) {
+  return window['go']['main']['App']['ImportHotmailText'](arg1, arg2);
+}
+
 export function ImportProxySubscription(arg1) {
   return window['go']['main']['App']['ImportProxySubscription'](arg1);
 }
