@@ -212,3 +212,41 @@ node .\scripts\minimax-fast-batch.mjs
   用 `MINIMAX_CURSOR_DIRECT=1` 控制。
 - 批量入口：CLI `-cursor-batch -cursor-count N`，GUI「绑定 Cursor 账号」按钮；
   号池用 `outputDir/cursor-test/pool.json` 副本，不污染主号池。
+
+## 号池的平台维度（MiniMax / Cursor 复用同一批邮箱）
+
+号池里每个邮箱带一份 `platforms` 映射，键是平台 ID（`minimax` / `cursor`），
+值是该邮箱在这个平台上的状态：
+
+```json
+{
+  "email": "stoneydeucher952151@hotmail.com",
+  "status": "used",
+  "platforms": {
+    "minimax": { "status": "used", "updatedAt": "2026-11-19T05:03:51Z" },
+    "cursor":  { "status": "used", "panelUser": "stoneydeucher952151@hotmail.com",
+                 "signInId": "t9AB9rb3-k2r", "registeredAt": "2026-11-20T12:01:19Z" }
+  }
+}
+```
+
+规则：
+
+- `used` / `reserved` 是**平台级**的：同一个邮箱在 MiniMax 上注册过，照样能拿去绑 Cursor，
+  反之亦然，互不影响。
+- `skipped` 是**邮箱级**的：Graph 令牌失效，所有平台都不能再用（写 `skipped` 时会同步所有平台）。
+- 老号池（没有 `platforms` 字段）读取时自动迁移：旧的 `status=used` 记到 `minimax`，
+  `cursor` 视为可用，所以历史号能直接拿来做 Cursor 绑定。
+- 领号按平台排队：`ClaimFor(platform)` 只看该平台的状态，
+  没在该平台用过的邮箱排在最前，优先复用。
+- MiniMax 与 Cursor 共用同一个号池文件，用 `.lock` 文件做跨进程互斥，避免互相覆盖。
+- GUI 资源区新增「MiniMax 可用 / Cursor 可用 / 两平台通用」三行统计。
+
+接口：
+
+```go
+store.ClaimFor(PlatformCursor)                     // 按平台领号
+store.FinalizeFor(PlatformCursor, idx, email, ...)  // 按平台回写状态
+store.MarkPlatformUsed(PlatformCursor, idx, email, panelUser, signInID)
+pool.StatsByPlatform()                              // 各平台分别的统计
+```

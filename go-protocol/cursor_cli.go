@@ -28,6 +28,7 @@ func cursorTestDir(cfg Config) string {
 }
 
 // prepareCursorTestPool 把主号池复制一份到测试目录，测试只动副本。
+// 现在 Cursor 与 MiniMax 共用主号池、按平台分别记账，这个副本只作为老流程的兜底。
 func prepareCursorTestPool(cfg Config) (string, error) {
 	dir := cursorTestDir(cfg)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -99,11 +100,7 @@ func runCLITestCursor(panelBase, panelKey, email string) {
 		bridgeAddr = addr
 	}
 
-	poolPath, err := prepareCursorTestPool(cfg)
-	if err != nil {
-		fmt.Printf("[cursor] 准备测试号池失败: %v\n", err)
-		return
-	}
+	poolPath := cfg.HotmailPool
 	store := NewHotmailPoolStore(poolPath)
 	var acc *HotmailAccount
 	var idx int
@@ -126,12 +123,11 @@ func runCLITestCursor(panelBase, panelKey, email string) {
 		}
 	} else {
 		var cerr error
-		acc, idx, cerr = store.Claim()
-		err = cerr
-	}
-	if err != nil {
-		fmt.Printf("[cursor] 号池取号失败: %v\n", err)
-		return
+		acc, idx, cerr = store.ClaimFor(PlatformCursor)
+		if cerr != nil {
+			fmt.Printf("[cursor] 号池取号失败: %v\n", cerr)
+			return
+		}
 	}
 	fmt.Printf("[cursor] 使用邮箱 %s\n", acc.Email)
 
@@ -139,12 +135,12 @@ func runCLITestCursor(panelBase, panelKey, email string) {
 	panel, err := NewPanelClient(panelBase, panelKey, dialer, cfg.ProxyDirectHosts)
 	if err != nil {
 		fmt.Printf("[cursor] 面板客户端错误: %v\n", err)
-		store.Finalize(idx, acc.Email, "available", err.Error(), "")
+		store.FinalizeFor(PlatformCursor, idx, acc.Email, "available", err.Error(), "")
 		return
 	}
 	if err := panel.Login(ctx); err != nil {
 		fmt.Printf("[cursor] 面板登录失败: %v\n", err)
-		store.Finalize(idx, acc.Email, "available", err.Error(), "")
+		store.FinalizeFor(PlatformCursor, idx, acc.Email, "available", err.Error(), "")
 		return
 	}
 
@@ -186,13 +182,14 @@ func runCLITestCursor(panelBase, panelKey, email string) {
 	if err != nil {
 		out.Error = err.Error()
 		fmt.Printf("[cursor] 失败: %v\n", err)
-		store.Finalize(idx, acc.Email, "available", err.Error(), "")
+		store.FinalizeFor(PlatformCursor, idx, acc.Email, "available", err.Error(), "")
 	} else {
 		out.OK = true
 		out.PanelUser = res.User
 		out.SignInID = res.SignInID
 		fmt.Printf("[cursor] 成功：邮箱 %s 面板账号 %s\n", res.Email, res.User)
-		store.Finalize(idx, acc.Email, "used", "", acc.RefreshToken)
+		store.FinalizeFor(PlatformCursor, idx, acc.Email, "used", "", acc.RefreshToken)
+		store.MarkPlatformUsed(PlatformCursor, idx, acc.Email, res.User, res.SignInID)
 	}
 	saveCursorResult(cfg, out)
 }
@@ -224,11 +221,7 @@ func runCLICursorBatch(panelBase, panelKey string, count int) {
 			dialer = d
 		}
 	}
-	poolPath, err := prepareCursorTestPool(cfg)
-	if err != nil {
-		fmt.Printf("[cursor] 准备号池失败: %v\n", err)
-		return
-	}
+	poolPath := cfg.HotmailPool
 	store := NewHotmailPoolStore(poolPath)
 	ctx := context.Background()
 	panel, err := NewPanelClient(panelBase, panelKey, dialer, cfg.ProxyDirectHosts)
@@ -242,7 +235,7 @@ func runCLICursorBatch(panelBase, panelKey string, count int) {
 	mailClient := &http.Client{Timeout: 30 * time.Second}
 	ok, fail := 0, 0
 	for ok < count {
-		acc, idx, cerr := store.Claim()
+		acc, idx, cerr := store.ClaimFor(PlatformCursor)
 		if cerr != nil {
 			fmt.Printf("[cursor] 号池取号失败: %v\n", cerr)
 			break
@@ -265,14 +258,15 @@ func runCLICursorBatch(panelBase, panelKey string, count int) {
 		if rerr != nil {
 			fail++
 			out.Error = rerr.Error()
-			store.Finalize(idx, acc.Email, "available", rerr.Error(), "")
+			store.FinalizeFor(PlatformCursor, idx, acc.Email, "available", rerr.Error(), "")
 			fmt.Printf("[cursor] 失败: %v\n", rerr)
 		} else {
 			ok++
 			out.OK = true
 			out.PanelUser = res.User
 			out.SignInID = res.SignInID
-			store.Finalize(idx, acc.Email, "used", "", acc.RefreshToken)
+			store.FinalizeFor(PlatformCursor, idx, acc.Email, "used", "", acc.RefreshToken)
+			store.MarkPlatformUsed(PlatformCursor, idx, acc.Email, res.User, res.SignInID)
 			fmt.Printf("[cursor] 成功 %d/%d：%s -> 面板账号 %s\n", ok, count, res.Email, res.User)
 		}
 		saveCursorResult(cfg, out)

@@ -79,11 +79,7 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 	// 面板与 Graph 邮箱请求仍走配置的上游代理。
 	bridgeAddr := ""
 	a.emitBatchLog("info", "[cursor] 浏览器走系统代理，面板与邮箱请求走配置代理")
-	poolPath, err := prepareCursorTestPool(cfg)
-	if err != nil {
-		a.emitBatchLog("error", "[cursor] 准备号池失败: "+err.Error())
-		return
-	}
+	poolPath := cfg.HotmailPool
 	store := NewHotmailPoolStore(poolPath)
 	panel, err := NewPanelClient(panelBase, panelKey, dialer, cfg.ProxyDirectHosts)
 	if err == nil {
@@ -98,7 +94,7 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 		if ctx.Err() != nil {
 			return
 		}
-		acc, idx, cerr := store.Claim()
+		acc, idx, cerr := store.ClaimFor(PlatformCursor)
 		if cerr != nil {
 			a.emitBatchLog("error", "[cursor] 号池取号失败: "+cerr.Error())
 			return
@@ -119,11 +115,12 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 		})
 		if rerr != nil {
 			fail++
-			store.Finalize(idx, acc.Email, "available", rerr.Error(), "")
+			store.FinalizeFor(PlatformCursor, idx, acc.Email, "available", rerr.Error(), "")
 			a.emitBatchLog("error", "["+acc.Email+"] "+rerr.Error())
 		} else {
 			ok++
-			store.Finalize(idx, acc.Email, "used", "", acc.RefreshToken)
+			store.FinalizeFor(PlatformCursor, idx, acc.Email, "used", "", acc.RefreshToken)
+			store.MarkPlatformUsed(PlatformCursor, idx, acc.Email, res.User, res.SignInID)
 			a.emitBatchLog("info", fmt.Sprintf("[cursor] 成功 %d/%d：%s -> 面板账号 %s", ok, count, acc.Email, res.User))
 		}
 		emitEvent("batch:progress", ProgressLite{

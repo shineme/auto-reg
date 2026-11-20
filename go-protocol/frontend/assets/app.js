@@ -885,6 +885,18 @@
     $("poolUsed").textContent = fmtInt(st.used);
     const pct = st.total > 0 ? (st.available / st.total) * 100 : 0;
     $("poolMeter").style.width = pct.toFixed(1) + "%";
+    renderPoolByPlatform(st.byPlatform || {});
+  }
+
+  /* 号池按平台分开统计：同一个邮箱可以在 MiniMax 和 Cursor 上各自复用 */
+  function renderPoolByPlatform(by) {
+    const mm = by.minimax || {};
+    const cu = by.cursor || {};
+    $("poolAvailMiniMax").textContent = fmtInt(mm.available || 0);
+    $("poolAvailCursor").textContent = fmtInt(cu.available || 0);
+    // 两平台都能用的 = 两个平台都没标记已用
+    const shared = Math.min(mm.available || 0, cu.available || 0);
+    $("poolShared").textContent = fmtInt(shared);
   }
   function renderNodes(st) {
     if (!st) return;

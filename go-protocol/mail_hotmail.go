@@ -27,10 +27,66 @@ type HotmailAccount struct {
 	Password     string `json:"password"`
 	ClientID     string `json:"clientId"`
 	RefreshToken string `json:"refreshToken"`
-	Status       string `json:"status"` // available | reserved | used | skipped
+	Status       string `json:"status"` // available | reserved | used | skipped（整体状态，等价于 Platforms[默认平台]）
 	FailCount    int    `json:"failCount,omitempty"`
 	LastError    string `json:"lastError,omitempty"`
 	UpdatedAt    string `json:"updatedAt,omitempty"`
+	// Platforms 记录这个邮箱在各个平台上的使用状态，键是平台 ID（如 minimax / cursor）。
+	// 同一个邮箱可以在 MiniMax 上注册过，也照样能拿去绑 Cursor，互不影响。
+	Platforms map[string]*PlatformState `json:"platforms,omitempty"`
+}
+
+// PlatformState 是某个邮箱在单个平台上的状态。
+type PlatformState struct {
+	Status       string `json:"status"` // available | reserved | used | skipped
+	PanelUser    string `json:"panelUser,omitempty"`
+	SignInID     string `json:"signInId,omitempty"`
+	LastError    string `json:"lastError,omitempty"`
+	UpdatedAt    string `json:"updatedAt,omitempty"`
+	FailCount    int    `json:"failCount,omitempty"`
+	RegisteredAt string `json:"registeredAt,omitempty"`
+}
+
+// 平台 ID 常量。
+const (
+	PlatformMiniMax = "minimax"
+	PlatformCursor  = "cursor"
+)
+
+// PlatformStatus 取账号在指定平台上的状态，没有记录时按整体 Status 兜底。
+func (a *HotmailAccount) PlatformStatus(platform string) string {
+	if a != nil && a.Platforms != nil {
+		if st, ok := a.Platforms[platform]; ok && st != nil && st.Status != "" {
+			return st.Status
+		}
+	}
+	if a == nil {
+		return "available"
+	}
+	// skipped = 邮箱令牌本身失效，对所有平台都不可用。
+	if strings.TrimSpace(a.Status) == "skipped" {
+		return "skipped"
+	}
+	// 其余平台还没有记录，说明这个邮箱在那个平台上还没被用过。
+	return "available"
+}
+
+// setPlatformStatus 写入某个平台的状态，同时同步整体状态。
+func (a *HotmailAccount) setPlatformStatus(platform, status string) {
+	if a.Platforms == nil {
+		a.Platforms = map[string]*PlatformState{}
+	}
+	st, ok := a.Platforms[platform]
+	if !ok || st == nil {
+		st = &PlatformState{}
+		a.Platforms[platform] = st
+	}
+	st.Status = status
+	st.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	if platform == PlatformMiniMax || len(a.Platforms) == 1 {
+		// MiniMax 是主流程，整体状态跟着它走，保证老界面/老统计不变。
+		a.Status = status
+	}
 }
 
 type HotmailPool struct {
@@ -45,6 +101,8 @@ type HotmailPoolStats struct {
 	Reserved  int `json:"reserved"`
 	Used      int `json:"used"`
 	Skipped   int `json:"skipped"`
+	// ByPlatform 是各平台分别的统计，方便看清同一个邮箱在 MiniMax / Cursor 上的不同状态。
+	ByPlatform map[string]HotmailPoolStats `json:"byPlatform,omitempty"`
 }
 
 var uuidRe = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -64,7 +122,35 @@ func LoadHotmailPool(path string) (*HotmailPool, error) {
 	if p.Accounts == nil {
 		p.Accounts = []HotmailAccount{}
 	}
+	migrateHotmailPlatforms(&p)
 	return &p, nil
+}
+
+// migrateHotmailPlatforms 给老号池补上平台维度：
+// 老的 status=used 表示这个邮箱在 MiniMax 上注册过，Cursor 那边仍然可用。
+func migrateHotmailPlatforms(p *HotmailPool) {
+	if p == nil {
+		return
+	}
+	for i := range p.Accounts {
+		acc := &p.Accounts[i]
+		if acc.Platforms == nil {
+			acc.Platforms = map[string]*PlatformState{}
+		}
+		status := strings.TrimSpace(acc.Status)
+		if status == "" {
+			status = "available"
+		}
+		st, ok := acc.Platforms[PlatformMiniMax]
+		if !ok || st == nil {
+			acc.Platforms[PlatformMiniMax] = &PlatformState{
+				Status:    status,
+				FailCount: acc.FailCount,
+				LastError: acc.LastError,
+				UpdatedAt: acc.UpdatedAt,
+			}
+		}
+	}
 }
 
 func SaveHotmailPool(path string, p *HotmailPool) error {
@@ -88,6 +174,40 @@ func SaveHotmailPool(path string, p *HotmailPool) error {
 type HotmailPoolStore struct {
 	mu   sync.Mutex
 	path string
+}
+
+// poolFileLocks 保证同一个号池文件在同进程内只有一个写入者，
+// 不同流程（MiniMax / Cursor）共用号池时不会互相覆盖。
+var poolFileLocks sync.Map
+
+func poolFileLock(path string) *sync.Mutex {
+	v, _ := poolFileLocks.LoadOrStore(path, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
+
+// lockPoolFile 拿跨进程文件锁，防止两个程序同时改同一个号池文件。
+func lockPoolFile(path string) (func(), error) {
+	lockPath := path + ".lock"
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_ = f.Close()
+			return func() { _ = os.Remove(lockPath) }, nil
+		}
+		if !os.IsExist(err) {
+			return nil, err
+		}
+		// 锁文件超过 60 秒认为是残留，强制清掉。
+		if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > 60*time.Second {
+			_ = os.Remove(lockPath)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("等待号池文件锁超时: %s", lockPath)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 var ErrHotmailPoolExhausted = errors.New("Hotmail 账号池已无可用邮箱")
@@ -147,8 +267,24 @@ func NewHotmailPoolStore(path string) *HotmailPoolStore {
 
 // Claim reserves one available account. Returned index is valid for Finalize.
 func (s *HotmailPoolStore) Claim() (*HotmailAccount, int, error) {
+	return s.ClaimFor(PlatformMiniMax)
+}
+
+// ClaimFor 按平台领取一个可用邮箱。同一邮箱在不同平台上互不影响。
+func (s *HotmailPoolStore) ClaimFor(platform string) (*HotmailAccount, int, error) {
+	if platform == "" {
+		platform = PlatformMiniMax
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	fl := poolFileLock(s.path)
+	fl.Lock()
+	defer fl.Unlock()
+	unlock, err := lockPoolFile(s.path)
+	if err != nil {
+		return nil, -1, err
+	}
+	defer unlock()
 	pool, err := LoadHotmailPool(s.path)
 	if err != nil {
 		return nil, -1, err
@@ -156,11 +292,11 @@ func (s *HotmailPoolStore) Claim() (*HotmailAccount, int, error) {
 	best := -1
 	var bestAt time.Time
 	for i := range pool.Accounts {
-		status := strings.TrimSpace(pool.Accounts[i].Status)
+		status := strings.TrimSpace(pool.Accounts[i].PlatformStatus(platform))
 		if status != "" && status != "available" {
 			continue
 		}
-		at, _ := time.Parse(time.RFC3339, pool.Accounts[i].UpdatedAt)
+		at := pool.Accounts[i].platformUpdatedAt(platform)
 		if best < 0 || at.Before(bestAt) {
 			best = i
 			bestAt = at
@@ -169,7 +305,7 @@ func (s *HotmailPoolStore) Claim() (*HotmailAccount, int, error) {
 	if best < 0 {
 		return nil, -1, ErrHotmailPoolExhausted
 	}
-	pool.Accounts[best].Status = "reserved"
+	pool.Accounts[best].setPlatformStatus(platform, "reserved")
 	acc := pool.Accounts[best]
 	if err := SaveHotmailPool(s.path, pool); err != nil {
 		return nil, -1, err
@@ -177,12 +313,41 @@ func (s *HotmailPoolStore) Claim() (*HotmailAccount, int, error) {
 	return &acc, best, nil
 }
 
+// platformUpdatedAt 返回该账号在这个平台上的最后更新时间，用于先进先出。
+func (a *HotmailAccount) platformUpdatedAt(platform string) time.Time {
+	if a != nil && a.Platforms != nil {
+		if st, ok := a.Platforms[platform]; ok && st != nil && st.UpdatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, st.UpdatedAt); err == nil {
+				return t
+			}
+		}
+	}
+	// 这个平台还没用过 -> 视为最早，优先被领取（最大化跨平台复用）。
+	return time.Time{}
+}
+
 func (s *HotmailPoolStore) Finalize(index int, email, status, lastErr, refreshToken string) {
+	s.FinalizeFor(PlatformMiniMax, index, email, status, lastErr, refreshToken)
+}
+
+// FinalizeFor 按平台回写账号状态。不同平台的失败/成功互不影响。
+func (s *HotmailPoolStore) FinalizeFor(platform string, index int, email, status, lastErr, refreshToken string) {
+	if platform == "" {
+		platform = PlatformMiniMax
+	}
 	if index < 0 {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	fl := poolFileLock(s.path)
+	fl.Lock()
+	defer fl.Unlock()
+	unlock, err := lockPoolFile(s.path)
+	if err != nil {
+		return
+	}
+	defer unlock()
 	pool, err := LoadHotmailPool(s.path)
 	if err != nil || index >= len(pool.Accounts) {
 		return
@@ -201,22 +366,104 @@ func (s *HotmailPoolStore) Finalize(index int, email, status, lastErr, refreshTo
 		index = found
 	}
 	if status == "available" {
-		pool.Accounts[index].FailCount++
+		pool.Accounts[index].setPlatformFailCount(platform, pool.Accounts[index].platformFailCount(platform)+1)
 		// 可恢复失败（IP 风控 1200058、人机 1200063、验证码过期 1200059、网络抖动等）：
 		// 保持 available，UpdatedAt 刷新会自动排到队尾，下一轮重新尝试。
 		// 仅当连续 10 轮全失败（确认真坏号，如令牌失效残留）才永久 skipped，避免无限空转。
-		if pool.Accounts[index].FailCount >= 10 {
+		if pool.Accounts[index].platformFailCount(platform) >= 10 {
 			status = "skipped"
 			lastErr = "连续 10 轮失败，自动跳过: " + lastErr
 		}
 	}
 	if status == "used" {
-		pool.Accounts[index].FailCount = 0
+		pool.Accounts[index].setPlatformFailCount(platform, 0)
 	}
-	pool.Accounts[index].Status = status
-	pool.Accounts[index].LastError = lastErr
+	pool.Accounts[index].setPlatformStatus(platform, status)
+	if status == "skipped" {
+		// 令牌失效是邮箱级问题，所有平台都别再用它。
+		for pl, st := range pool.Accounts[index].Platforms {
+			if pl == platform || st == nil {
+				continue
+			}
+			st.Status = "skipped"
+			st.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		}
+	}
+	if platform == PlatformMiniMax {
+		pool.Accounts[index].LastError = lastErr
+	}
+	if platform == PlatformMiniMax {
+		pool.Accounts[index].FailCount = pool.Accounts[index].platformFailCount(platform)
+	}
 	if refreshToken != "" {
 		pool.Accounts[index].RefreshToken = refreshToken
+	}
+	pool.Accounts[index].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	_ = SaveHotmailPool(s.path, pool)
+}
+
+// platformFailCount 读取该平台上的连续失败次数。
+func (a *HotmailAccount) platformFailCount(platform string) int {
+	if a != nil && a.Platforms != nil {
+		if st, ok := a.Platforms[platform]; ok && st != nil {
+			return st.FailCount
+		}
+	}
+	return 0
+}
+
+// setPlatformFailCount 写入该平台上的连续失败次数。
+func (a *HotmailAccount) setPlatformFailCount(platform string, n int) {
+	if a.Platforms == nil {
+		a.Platforms = map[string]*PlatformState{}
+	}
+	st, ok := a.Platforms[platform]
+	if !ok || st == nil {
+		st = &PlatformState{}
+		a.Platforms[platform] = st
+	}
+	st.FailCount = n
+}
+
+// MarkPlatformUsed 记录某个平台上的绑定结果（面板账号、sign-in id）。
+func (s *HotmailPoolStore) MarkPlatformUsed(platform string, index int, email, panelUser, signInID string) {
+	if index < 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fl := poolFileLock(s.path)
+	fl.Lock()
+	defer fl.Unlock()
+	unlock, err := lockPoolFile(s.path)
+	if err != nil {
+		return
+	}
+	defer unlock()
+	pool, err := LoadHotmailPool(s.path)
+	if err != nil || index >= len(pool.Accounts) {
+		return
+	}
+	if email != "" && !strings.EqualFold(pool.Accounts[index].Email, email) {
+		found := -1
+		for i := range pool.Accounts {
+			if strings.EqualFold(pool.Accounts[i].Email, email) {
+				found = i
+				break
+			}
+		}
+		if found < 0 {
+			return
+		}
+		index = found
+	}
+	pool.Accounts[index].setPlatformStatus(platform, "used")
+	st := pool.Accounts[index].Platforms[platform]
+	if st != nil {
+		st.PanelUser = panelUser
+		st.SignInID = signInID
+		st.RegisteredAt = time.Now().UTC().Format(time.RFC3339)
+		st.FailCount = 0
 	}
 	pool.Accounts[index].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	_ = SaveHotmailPool(s.path, pool)
@@ -252,7 +499,49 @@ func (p *HotmailPool) Stats() HotmailPoolStats {
 			st.Available++
 		}
 	}
+	st.ByPlatform = p.StatsByPlatform()
 	return st
+}
+
+// StatsByPlatform 统计各平台分别的可用/已用情况。
+func (p *HotmailPool) StatsByPlatform() map[string]HotmailPoolStats {
+	out := map[string]HotmailPoolStats{}
+	if p == nil {
+		return out
+	}
+	platforms := []string{PlatformMiniMax, PlatformCursor}
+	for _, a := range p.Accounts {
+		seen := map[string]bool{}
+		if a.Platforms != nil {
+			for k := range a.Platforms {
+	seen[k] = true
+			}
+		}
+		if len(seen) == 0 {
+			seen[PlatformMiniMax] = true
+		}
+		for _, pl := range platforms {
+			if !seen[pl] {
+				continue
+			}
+			s := out[pl]
+			s.Total++
+			switch a.PlatformStatus(pl) {
+			case "available":
+				s.Available++
+			case "reserved":
+				s.Reserved++
+			case "used":
+				s.Used++
+			case "skipped":
+				s.Skipped++
+			default:
+				s.Available++
+			}
+			out[pl] = s
+		}
+	}
+	return out
 }
 
 func ImportHotmailRaw(path, raw string) (HotmailPoolStats, int, error) {
@@ -305,6 +594,15 @@ func ImportHotmailRaw(path, raw string) (HotmailPoolStats, int, error) {
 			if pool.Accounts[idx].Status == "" || pool.Accounts[idx].Status == "skipped" {
 				pool.Accounts[idx].Status = "available"
 			}
+			// 重新导入视为补齐凭据，清掉各平台的跳过状态，但保留已用标记。
+			for _, st := range pool.Accounts[idx].Platforms {
+				if st != nil && st.Status == "skipped" {
+					st.Status = "available"
+					st.FailCount = 0
+					st.LastError = ""
+					st.UpdatedAt = now
+				}
+			}
 			pool.Accounts[idx].UpdatedAt = now
 		} else {
 			existing[email] = len(pool.Accounts)
@@ -315,6 +613,9 @@ func ImportHotmailRaw(path, raw string) (HotmailPoolStats, int, error) {
 				RefreshToken: rt,
 				Status:       "available",
 				UpdatedAt:    now,
+				Platforms: map[string]*PlatformState{
+					PlatformMiniMax: {Status: "available", UpdatedAt: now},
+				},
 			})
 			added++
 		}
