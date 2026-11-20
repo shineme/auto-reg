@@ -145,6 +145,25 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 			dialer = d
 		}
 	}
+	// 节点池模式：订阅里存活的节点轮流当出口，每个账号换一次 IP。
+	var poolSpecs []proxyNodeSpec
+	if cfg.ProxyPoolUse {
+		pool, perr := LoadProxyPool(proxyPoolPath(cfg))
+		if perr != nil {
+			a.emitBatchLog("error", "[cursor] 读取节点池失败（"+perr.Error()+"），回退固定代理")
+		} else {
+			poolSpecs = nodesToDialerSpecs(pool.Nodes)
+			if len(poolSpecs) == 0 {
+				a.emitBatchLog("error", "[cursor] 节点池里没有存活节点，改用固定代理")
+				poolSpecs = nil
+			} else {
+				a.emitBatchLog("info", fmt.Sprintf("[cursor] 节点池已启用：%d 个存活节点，每个账号轮换出口 IP", len(poolSpecs)))
+			}
+		}
+	}
+	if dialer != nil && len(poolSpecs) > 0 {
+		dialer.SetPoolNodes(poolSpecs, 0)
+	}
 	// Cursor 浏览器单独配一个出口：Cursor 对数据中心 IP 很敏感，
 	// 数据中心 IP 会被 cursor.com 直接 reset，需要住宅代理。
 	bridgeAddr := ""
@@ -152,11 +171,15 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 	if browserProxy == "" {
 		browserProxy = cfg.ProxyURL
 	}
+	var browserDialer *ProxyDialer
 	if browserProxy != "" {
 		bd, berr := NewProxyDialer(browserProxy)
 		if berr == nil {
 			bd.SetOptionsEx(splitRegions(cfg.ProxyRegionRotate), cfg.ProxySessTime,
 				parseProxyStyle(cfg.ProxyStyle), cfg.ProxyState, cfg.StickyEnabled(), cfg.ProxyRotateSession)
+			if len(poolSpecs) > 0 {
+				bd.SetPoolNodes(poolSpecs, 0)
+			}
 		}
 		if berr == nil && bd.Enabled() {
 			bridge, addr, err := StartLocalHTTPBridgeWithDialer(bd)
@@ -164,6 +187,7 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 				defer bridge.Close()
 				bridgeAddr = addr
 			}
+			browserDialer = bd
 		}
 	}
 	if bridgeAddr == "" {
@@ -195,6 +219,18 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 		cursorRunState.currentEmail = acc.Email
 		cursorRunState.updatedAt = time.Now().Format("15:04:05")
 		cursorRunState.mu.Unlock()
+		// 每个账号换一个出口 IP（节点池模式下换节点，固定代理模式下换会话）。
+		if dialer != nil && len(poolSpecs) > 0 {
+			dialer.RotateSession()
+		}
+		if browserDialer != nil && len(poolSpecs) > 0 {
+			browserDialer.RotateSession()
+		}
+		if name := browserDialer.CurrentNodeName(); name != "" {
+			a.emitBatchLog("info", "["+acc.Email+"] 本次出口节点: "+name)
+		} else if ip := exitIPOf(browserDialer); ip != "" {
+			a.emitBatchLog("info", "["+acc.Email+"] 本次出口 IP: "+ip)
+		}
 		flow := &CursorFlow{
 			Panel:      panel,
 			ChromePath: cfg.ChromePath,

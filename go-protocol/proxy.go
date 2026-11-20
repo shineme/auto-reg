@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -17,6 +18,35 @@ import (
 
 	"golang.org/x/net/proxy"
 )
+
+// exitIPOf 查询当前代理出口的公网 IP，查不到返回空串（只用于日志展示）。
+func exitIPOf(p *ProxyDialer) string {
+	if p == nil || !p.Enabled() {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.ipify.org?format=json", nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := p.HTTPClient(10 * time.Second).Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 512))
+	if err != nil {
+		return ""
+	}
+	var out struct {
+		IP string `json:"ip"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return ""
+	}
+	return out.IP
+}
 
 // ProxyStyle 区分不同代理商的用户名参数体系。
 type ProxyStyle int
