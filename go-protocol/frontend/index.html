@@ -267,7 +267,10 @@
               <option value="both">MiniMax + Cursor 同时跑</option>
             </select>
           </div>
-          <div class="field"><label for="cursorCount">Cursor 目标数量</label><input id="cursorCount" type="number" min="1" max="5000" /></div>
+          <div class="grid2">
+            <div class="field"><label for="cursorCount">Cursor 目标数量</label><input id="cursorCount" type="number" min="1" max="5000" /></div>
+            <div class="field"><label for="cursorWorkers">Cursor 并发线程 <em>0=每个面板 1 个</em></label><input id="cursorWorkers" type="number" min="0" max="16" placeholder="默认按面板数" /></div>
+          </div>
             <div class="field"><label for="timezoneId">签到时区 <em>timezone_id</em></label><input id="timezoneId" placeholder="Asia/Shanghai" spellcheck="false" /></div>
           </div>
           <label class="switch"><input type="checkbox" id="captchaDirect" /><span class="track"></span><span class="sw-text">验证码页面直连<em>代理不稳时勾选</em></span></label>

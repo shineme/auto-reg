@@ -108,6 +108,7 @@ export namespace main {
 	    workers: number;
 	    platformMode: string;
 	    cursorCount: number;
+	    cursorWorkers: number;
 	    captchaDirect: boolean;
 	    mailViaProxy: boolean;
 	    signinAfterRegister: boolean;
@@ -160,6 +161,7 @@ export namespace main {
 	        this.workers = source["workers"];
 	        this.platformMode = source["platformMode"];
 	        this.cursorCount = source["cursorCount"];
+	        this.cursorWorkers = source["cursorWorkers"];
 	        this.captchaDirect = source["captchaDirect"];
 	        this.mailViaProxy = source["mailViaProxy"];
 	        this.signinAfterRegister = source["signinAfterRegister"];

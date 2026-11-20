@@ -20,7 +20,7 @@ func cursorCaptchaWaitLimit() time.Duration {
 			return time.Duration(n) * time.Second
 		}
 	}
-	return 90 * time.Second
+	return 60 * time.Second
 }
 
 // cursorFlowDeadline 单次授权尝试的时间上限（可用 MINIMAX_CURSOR_FLOW_TIMEOUT 覆盖）。
@@ -30,7 +30,7 @@ func cursorFlowDeadline() time.Duration {
 			return time.Duration(n) * time.Second
 		}
 	}
-	return 7 * time.Minute
+	return 4 * time.Minute
 }
 
 // Execute 跑完整 Cursor 授权流程：deep-control 页面、邮箱登录页、验证码、密码，面板落库。

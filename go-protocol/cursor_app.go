@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -233,9 +234,36 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 	if n := store.ReleaseReserved(PlatformCursor); n > 0 {
 		a.emitBatchLog("info", fmt.Sprintf("[cursor] 已释放 %d 个上次残留的占用邮箱", n))
 	}
-	turn := 0
-	for ok < count {
+	// 并发：默认每个面板一个 worker（同一面板不并发，避免 user_code 互相抢占）。
+	workers := cfg.CursorWorkers
+	if workers <= 0 {
+		workers = len(panels)
+	}
+	if workers > len(panels) {
+		a.emitBatchLog("info", fmt.Sprintf("[cursor] 并发 %d 大于面板数 %d，同一面板会同时处理多个账号", workers, len(panels)))
+	}
+	var okCount, failCount int64
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			runCursorWorker(ctx, a, cfg, store, panels[worker%len(panels)], dialer, browserDialer,
+				poolSpecs, bridgeAddr, mailClient, &okCount, &failCount, count)
+		}(w)
+	}
+	wg.Wait()
+}
+
+// runCursorWorker 一个并发线程：一直领号、绑定，直到达到目标或号池取空。
+func runCursorWorker(ctx context.Context, a *App, cfg Config, store *HotmailPoolStore,
+	panel *PanelClient, dialer *ProxyDialer, browserDialer *ProxyDialer, poolSpecs []proxyNodeSpec,
+	bridgeAddr string, mailClient *http.Client, okCount, failCount *int64, count int) {
+	for {
 		if ctx.Err() != nil {
+			return
+		}
+		if atomic.LoadInt64(okCount) >= int64(count) {
 			return
 		}
 		acc, idx, cerr := store.ClaimFor(PlatformCursor)
@@ -247,8 +275,6 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 		cursorRunState.currentEmail = acc.Email
 		cursorRunState.updatedAt = time.Now().Format("15:04:05")
 		cursorRunState.mu.Unlock()
-		panel := panels[turn%len(panels)]
-		turn++
 		a.emitBatchLog("info", "["+acc.Email+"] 分配到面板: "+panel.baseURL)
 		// 每个账号换一个出口 IP（节点池模式下换节点，固定代理模式下换会话）。
 		if dialer != nil && len(poolSpecs) > 0 {
@@ -268,7 +294,7 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 			ProxyBidge: bridgeAddr,
 			ProfileDir: filepath.Join(cursorTestDir(cfg), "chrome-profiles"),
 			FetchLink: func(ctx context.Context, notBefore time.Time) (string, error) {
-				return PollHotmailLink(ctx, mailClient, acc, notBefore, 3*time.Minute, "cursor-confirm")
+				return PollHotmailLink(ctx, mailClient, acc, notBefore, 2*time.Minute, "cursor-confirm")
 			},
 		}
 		// 单个账号最多试 2 次：第一次失败多半是出口 IP 不行，换节点/换会话再来一次。
@@ -276,7 +302,7 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 		var rerr error
 		for attempt := 1; attempt <= 2; attempt++ {
 			res, rerr = flow.Execute(ctx, acc.Email, func(ctx context.Context, notBefore time.Time) (string, error) {
-				return PollHotmailCodeFor(ctx, mailClient, acc, notBefore, 3*time.Minute, "cursor")
+				return PollHotmailCodeFor(ctx, mailClient, acc, notBefore, 2*time.Minute, "cursor")
 			}, func(step string) {
 				a.emitBatchLog("info", "["+acc.Email+"] "+step)
 				// 每一步都刷新一下状态，界面上才看得出还在动
@@ -301,7 +327,7 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 			time.Sleep(3 * time.Second)
 		}
 		if rerr != nil {
-			fail++
+			fail := int(atomic.AddInt64(failCount, 1))
 			cursorRunState.mu.Lock()
 			cursorRunState.failed = fail
 			cursorRunState.updatedAt = time.Now().Format("15:04:05")
@@ -309,7 +335,7 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 			store.FinalizeFor(PlatformCursor, idx, acc.Email, "available", rerr.Error(), "")
 			a.emitBatchLog("error", "["+acc.Email+"] "+rerr.Error())
 		} else {
-			ok++
+			ok := int(atomic.AddInt64(okCount, 1))
 			cursorRunState.mu.Lock()
 			cursorRunState.succeeded = ok
 			cursorRunState.lastPanelUser = res.User
@@ -320,7 +346,7 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 			a.emitBatchLog("info", fmt.Sprintf("[cursor] 成功 %d/%d：%s -> 面板账号 %s", ok, count, acc.Email, res.User))
 		}
 		emitEvent("batch:progress", ProgressLite{
-			Target: count, Succeeded: ok, FailedAttempts: fail,
+			Target: count, Succeeded: int(atomic.LoadInt64(okCount)), FailedAttempts: int(atomic.LoadInt64(failCount)),
 			CurrentStage: "Cursor 授权绑定", CurrentEmail: acc.Email,
 			Running: true, UpdatedAt: time.Now().Format("15:04:05"),
 		})

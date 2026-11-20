@@ -7,7 +7,7 @@
 
   const FIELDS = [
     "panelBase", "panelKey", "panel2Base", "panel2Key", "mailMode", "count", "workers",
-    "platformMode", "cursorCount",
+    "platformMode", "cursorCount", "cursorWorkers",
     "captchaDirect", "mailViaProxy", "signinAfterRegister", "timezoneId",
     "mailDomain", "mailPrefix", "imapHost", "imapPort", "imapUser", "imapPassword",
     "hotmailRaw", "hotmailPool", "hotmailPreflightWorkers",
@@ -695,6 +695,7 @@
     { id: "workers", title: "并行线路数", sec: "task" },
     { id: "platformMode", title: "运行平台", sec: "task" },
     { id: "cursorCount", title: "Cursor 目标数量", sec: "task" },
+    { id: "cursorWorkers", title: "Cursor 并发线程", sec: "task" },
     { id: "mailMode", title: "接码模式", sec: "task" },
     { id: "signinAfterRegister", title: "注册后自动签到", sec: "task" },
     { id: "hotmailPool", title: "号池文件路径", sec: "mail" },

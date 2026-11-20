@@ -59,6 +59,9 @@ type Config struct {
 	PlatformMode string `json:"platformMode"`
 	// CursorCount: cursor 模式（或 both 模式）下目标绑定成功的 Cursor 账号数。
 	CursorCount int `json:"cursorCount"`
+// CursorWorkers: Cursor 绑定的并发线程数，0 = 每个面板一个线程。
+// 同一面板并发多个线程会互相抢占 user_code，建议不超过面板数。
+CursorWorkers int `json:"cursorWorkers"`
 	CaptchaDirect           bool     `json:"captchaDirect"`
 	MailViaProxy            bool     `json:"mailViaProxy"`
 	SigninAfterRegister     bool     `json:"signinAfterRegister"`
