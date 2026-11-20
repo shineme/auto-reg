@@ -608,3 +608,32 @@ func nodesToDialerSpecs(nodes []ProxyNodeInfo) []proxyNodeSpec {
 	return specs
 }
 
+// poolWatcher 监视节点池文件变化：定时任务刷新节点池后，批量无需重启即可换用新节点。
+type poolWatcher struct {
+	path  string
+	mod   time.Time
+	specs []proxyNodeSpec
+}
+
+// refresh 在节点池文件变更时返回新的可用节点列表。
+func (w *poolWatcher) refresh() ([]proxyNodeSpec, bool) {
+	if w == nil || strings.TrimSpace(w.path) == "" {
+		return nil, false
+	}
+	st, err := os.Stat(w.path)
+	if err != nil {
+		return nil, false
+	}
+	if !st.ModTime().After(w.mod) {
+		return nil, false
+	}
+	pool, err := LoadProxyPool(w.path)
+	if err != nil {
+		return nil, false
+	}
+	specs := nodesToDialerSpecs(pool.Nodes)
+	w.mod = st.ModTime()
+	w.specs = specs
+	return specs, true
+}
+

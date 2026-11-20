@@ -268,6 +268,7 @@ func (r *ProtocolRunner) workerLoop(ctx context.Context, cfg Config, workerID in
 		r.emitLog("info", fmt.Sprintf("[%d] 代理区域轮换已启用: %s（风格=%s, sessTime=%d 分钟, sticky=%v）", workerID, cfg.ProxyRegionRotate, cfg.ProxyStyle, cfg.ProxySessTime, cfg.StickyEnabled()))
 	}
 	// 节点池模式：用订阅里存活的节点替代固定代理，每个节点一个出口 IP。
+	var watcher *poolWatcher
 	if cfg.ProxyPoolUse {
 		pool, err := LoadProxyPool(proxyPoolPath(cfg))
 		if err != nil {
@@ -281,6 +282,7 @@ func (r *ProtocolRunner) workerLoop(ctx context.Context, cfg Config, workerID in
 				r.emitLog("info", fmt.Sprintf("[%d] 节点池已启用：%d 个存活节点，每次尝试轮换出口 IP", workerID, len(specs)))
 			}
 		}
+		watcher = &poolWatcher{path: proxyPoolPath(cfg)}
 	}
 
 	var bridge *LocalHTTPBridge
@@ -321,7 +323,7 @@ func (r *ProtocolRunner) workerLoop(ctx context.Context, cfg Config, workerID in
 		}
 
 		attempt := int(atomic.AddInt64(&r.attemptSeq, 1))
-		res := r.runOne(ctx, cfg, dialer, bridgeAddr, panel, ticketProvider, store, workerID, attempt)
+		res := r.runOne(ctx, cfg, dialer, bridgeAddr, panel, ticketProvider, store, watcher, workerID, attempt)
 		r.mu.Lock()
 		if res.OK {
 			r.summary.Succeeded++
@@ -351,10 +353,17 @@ func (r *ProtocolRunner) setStage(stage, email string) {
 	r.emitState()
 }
 
-func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDialer, bridgeAddr string, panel *PanelClient, tp TicketProvider, store *HotmailPoolStore, workerID, attempt int) AccountResult {
+func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDialer, bridgeAddr string, panel *PanelClient, tp TicketProvider, store *HotmailPoolStore, watcher *poolWatcher, workerID, attempt int) AccountResult {
 	res := AccountResult{
 		Attempt:   attempt,
 		CreatedAt: time.Now().Format(time.RFC3339),
+	}
+	// 节点池被刷新后热加载（不中断批量）
+	if watcher != nil {
+		if specs, ok := watcher.refresh(); ok && len(specs) > 0 && dialer != nil {
+			dialer.SetPoolNodes(specs, workerID-1)
+			r.emitLog("info", fmt.Sprintf("[%d] 节点池已热更新：%d 个存活节点", workerID, len(specs)))
+		}
 	}
 	if dialer != nil {
 		dialer.RotateSession()
