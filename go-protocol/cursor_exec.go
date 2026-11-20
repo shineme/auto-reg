@@ -23,6 +23,16 @@ func cursorCaptchaWaitLimit() time.Duration {
 	return 90 * time.Second
 }
 
+// cursorFlowDeadline 单次授权尝试的时间上限（可用 MINIMAX_CURSOR_FLOW_TIMEOUT 覆盖）。
+func cursorFlowDeadline() time.Duration {
+	if v := os.Getenv("MINIMAX_CURSOR_FLOW_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 7 * time.Minute
+}
+
 // Execute 跑完整 Cursor 授权流程：deep-control 页面、邮箱登录页、验证码、密码，面板落库。
 func (f *CursorFlow) Execute(ctx context.Context, email string, fetchCode func(ctx context.Context, notBefore time.Time) (string, error), onStep func(string)) (*CursorResult, error) {
 	signIn, err := f.Panel.StartPluginSignInProvider(ctx, cursorProviderID)
@@ -46,7 +56,8 @@ func (f *CursorFlow) Execute(ctx context.Context, email string, fetchCode func(c
 		return nil, fmt.Errorf("注入页面脚本失败: %w", err)
 	}
 
-	deadline := time.Now().Add(12 * time.Minute)
+	// 单次尝试的上限：卡住时尽快放弃换出口，别把整条队列拖住。
+	deadline := time.Now().Add(cursorFlowDeadline())
 	codeRequestedAt := time.Now()
 	emailTries := 0
 	codeTries := 0

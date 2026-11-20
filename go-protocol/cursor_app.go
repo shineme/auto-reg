@@ -230,6 +230,9 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 		return
 	}
 	mailClient := &http.Client{Timeout: 30 * time.Second}
+	if n := store.ReleaseReserved(PlatformCursor); n > 0 {
+		a.emitBatchLog("info", fmt.Sprintf("[cursor] 已释放 %d 个上次残留的占用邮箱", n))
+	}
 	turn := 0
 	for ok < count {
 		if ctx.Err() != nil {
@@ -276,6 +279,11 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 				return PollHotmailCodeFor(ctx, mailClient, acc, notBefore, 3*time.Minute, "cursor")
 			}, func(step string) {
 				a.emitBatchLog("info", "["+acc.Email+"] "+step)
+				// 每一步都刷新一下状态，界面上才看得出还在动
+				cursorRunState.mu.Lock()
+				cursorRunState.currentEmail = acc.Email
+				cursorRunState.updatedAt = time.Now().Format("15:04:05")
+				cursorRunState.mu.Unlock()
 			})
 			if rerr == nil {
 				break

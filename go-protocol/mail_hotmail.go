@@ -425,6 +425,39 @@ func (a *HotmailAccount) setPlatformFailCount(platform string, n int) {
 	st.FailCount = n
 }
 
+// ReleaseReserved 把某个平台上残留的占用（reserved）放回可用。
+// 上一次任务崩掉时账号会一直卡在占用中，号池再也取不到它。
+func (s *HotmailPoolStore) ReleaseReserved(platform string) int {
+	if platform == "" {
+		platform = PlatformMiniMax
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fl := poolFileLock(s.path)
+	fl.Lock()
+	defer fl.Unlock()
+	unlock, err := lockPoolFile(s.path)
+	if err != nil {
+		return 0
+	}
+	defer unlock()
+	pool, err := LoadHotmailPool(s.path)
+	if err != nil {
+		return 0
+	}
+	released := 0
+	for i := range pool.Accounts {
+		if strings.TrimSpace(pool.Accounts[i].PlatformStatus(platform)) == "reserved" {
+			pool.Accounts[i].setPlatformStatus(platform, "available")
+			released++
+		}
+	}
+	if released > 0 {
+		_ = SaveHotmailPool(s.path, pool)
+	}
+	return released
+}
+
 // MarkPlatformUsed 记录某个平台上的绑定结果（面板账号、sign-in id）。
 func (s *HotmailPoolStore) MarkPlatformUsed(platform string, index int, email, panelUser, signInID string) {
 	if index < 0 {
