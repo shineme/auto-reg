@@ -48,3 +48,36 @@ func contains(s, sub string) bool {
 		return false
 	})()
 }
+
+func TestZooProxyUsername(t *testing.T) {
+	// zooproxy：region-Rand + 写死 sid，勾选"强制换新会话"后应换成新 sid
+	p, err := NewProxyDialer("socks5://5v8rrjwzio51283-region-Rand-sid-nKYCezDN-t-10:jjxqd63c@us-eu.zooproxy.com:5000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.SetOptionsEx(nil, 10, StyleAuto, "", true, true)
+	p.RotateSession()
+	u := p.stickyUser()
+	t.Logf("zoo=%s", u)
+	if !contains(u, "-sid-") || !contains(u, "-t-10") {
+		t.Fatalf("zoo username wrong: %s", u)
+	}
+	if contains(u, "nKYCezDN") {
+	t.Fatalf("fixed sid should be replaced: %s", u)
+	}
+	if !contains(u, "region-Rand") {
+	t.Fatalf("region should be kept when no rotation configured: %s", u)
+}
+	// 指定国家时应替换 region-Rand
+	p2, _ := NewProxyDialer("socks5://5v8rrjwzio51283-region-Rand-sid-nKYCezDN-t-10:jjxqd63c@us-eu.zooproxy.com:5000")
+	p2.SetOptionsEx([]string{"JP"}, 10, StyleAuto, "", true, true)
+	p2.RotateSession()
+	u2 := p2.stickyUser()
+	t.Logf("zoo jp=%s", u2)
+	if !contains(u2, "-region-JP") {
+		t.Fatalf("region rotate failed: %s", u2)
+	}
+	if contains(u2, "region-Rand") {
+		t.Fatalf("region-Rand should be replaced: %s", u2)
+	}
+}

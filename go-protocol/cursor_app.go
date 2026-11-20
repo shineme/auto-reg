@@ -140,6 +140,8 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 	var dialer *ProxyDialer
 	if cfg.ProxyURL != "" {
 		if d, err := NewProxyDialer(cfg.ProxyURL); err == nil {
+			d.SetOptionsEx(splitRegions(cfg.ProxyRegionRotate), cfg.ProxySessTime,
+				parseProxyStyle(cfg.ProxyStyle), cfg.ProxyState, cfg.StickyEnabled(), cfg.ProxyRotateSession)
 			dialer = d
 		}
 	}
@@ -152,6 +154,10 @@ func (a *App) runCursorBinding(ctx context.Context, cfg Config, count int) {
 	}
 	if browserProxy != "" {
 		bd, berr := NewProxyDialer(browserProxy)
+		if berr == nil {
+			bd.SetOptionsEx(splitRegions(cfg.ProxyRegionRotate), cfg.ProxySessTime,
+				parseProxyStyle(cfg.ProxyStyle), cfg.ProxyState, cfg.StickyEnabled(), cfg.ProxyRotateSession)
+		}
 		if berr == nil && bd.Enabled() {
 			bridge, addr, err := StartLocalHTTPBridgeWithDialer(bd)
 			if err == nil {

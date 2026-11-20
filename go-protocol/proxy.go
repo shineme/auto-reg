@@ -45,6 +45,8 @@ type ProxyDialer struct {
 	state     string
 	style     ProxyStyle
 	sticky    bool
+	// rotateSession=true 时忽略用户名里写死的会话标识，每次轮换都换新 IP。
+	rotateSession bool
 	regionIdx int
 }
 
@@ -59,12 +61,15 @@ type proxyNodeSpec struct {
 }
 
 var (
-	regionRe = regexp.MustCompile(`(?i)region-[A-Z]{2}`)
+	// regionRe 匹配 region-XX（国家码）/ region-Rand（商家随机国家）。
+	regionRe = regexp.MustCompile(`(?i)-region-[A-Za-z]{2,12}`)
 	// Cliproxy 的会话标识参数：sid-<值>；711 的等价参数是 session-<值>
 	sidRe     = regexp.MustCompile(`(?i)(-sid-[^-]+)`)
 	sessionRe = regexp.MustCompile(`(?i)(-session-[^-]+)`)
 	// Cliproxy 的 IP 持续时间参数：t-<分钟>
 	clipTRe = regexp.MustCompile(`(?i)(-t-\d+)`)
+	// 711 的 IP 持续时间参数：sessTime-<分钟>
+	sessTimeRe = regexp.MustCompile(`(?i)(-sessTime-\d+)`)
 	// Cliproxy 州省参数：st-<州省>
 	stateRe = regexp.MustCompile(`(?i)(-st-[^-]+)`)
 )
@@ -73,7 +78,7 @@ var (
 func detectProxyStyle(host string) ProxyStyle {
 	h := strings.ToLower(host)
 	switch {
-	case strings.Contains(h, "cliproxy"):
+	case strings.Contains(h, "cliproxy"), strings.Contains(h, "zooproxy"):
 		return StyleClipProxy
 	case strings.Contains(h, "711proxy"), strings.Contains(h, "trustsource"):
 		return Style711
@@ -87,6 +92,12 @@ func detectProxyStyle(host string) ProxyStyle {
 // style 指定参数体系（0=自动识别）；state 为 Cliproxy 的 st-<州省>；
 // sticky=false 时不追加会话参数，即 Rotating 模式（每请求换 IP）。
 func (p *ProxyDialer) SetOptions(regions []string, sessTime int, style ProxyStyle, state string, sticky bool) {
+	p.SetOptionsEx(regions, sessTime, style, state, sticky, false)
+}
+
+// SetOptionsEx 在 SetOptions 基础上增加 rotateSession：
+// 为 true 时忽略用户名里写死的 session/sid，每次轮换都生成新会话（新出口 IP）。
+func (p *ProxyDialer) SetOptionsEx(regions []string, sessTime int, style ProxyStyle, state string, sticky bool, rotateSession bool) {
 	if p == nil {
 		return
 	}
@@ -101,6 +112,7 @@ func (p *ProxyDialer) SetOptions(regions []string, sessTime int, style ProxyStyl
 	p.style = style
 	p.state = strings.TrimSpace(state)
 	p.sticky = sticky
+	p.rotateSession = rotateSession
 }
 
 // SetPoolNodes 切换到节点池模式：每次 RotateSession 轮换到下一个节点出口。
@@ -148,9 +160,21 @@ func rotateRegion(base string, region string) string {
 		return base
 	}
 	if m := regionRe.FindString(base); m != "" {
-		return regionRe.ReplaceAllString(base, "region-"+region)
+		return regionRe.ReplaceAllString(base, "-region-"+region)
 	}
 	return base + "-region-" + region
+}
+
+// atoiSafe 解析数字，失败返回 0。
+func atoiSafe(s string) int {
+	n := 0
+	for _, r := range strings.TrimSpace(s) {
+		if r < '0' || r > '9' {
+			return 0
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
 }
 
 func NewProxyDialer(raw string) (*ProxyDialer, error) {
@@ -212,9 +236,24 @@ func (p *ProxyDialer) RotateSession() {
 	lower := strings.ToLower(base)
 	hasFixedSession := strings.Contains(lower, "-session-") || strings.Contains(lower, "_session-") ||
 		strings.Contains(lower, "-sessid-") || sidRe.MatchString(base)
-	if hasFixedSession {
+	if hasFixedSession && !p.rotateSession {
 		p.session = base
 		return
+	}
+	if hasFixedSession {
+		// 强制换会话：把写死的 sid / session 去掉，下面重新生成。
+		base = sidRe.ReplaceAllString(base, "")
+		base = sessionRe.ReplaceAllString(base, "")
+		// 原来写死的时长参数先摘出来（没配 sessTime 时沿用它）。
+		if m := clipTRe.FindString(base); m != "" && p.sessTime <= 0 {
+			p.sessTime = atoiSafe(strings.TrimPrefix(m, "-t-"))
+		}
+		if m := sessTimeRe.FindString(base); m != "" && p.sessTime <= 0 {
+			p.sessTime = atoiSafe(strings.TrimPrefix(m, "-sessTime-"))
+		}
+		base = clipTRe.ReplaceAllString(base, "")
+		base = sessTimeRe.ReplaceAllString(base, "")
+		base = strings.TrimSuffix(strings.TrimSpace(base), "-")
 	}
 
 	// 区域轮换（711 与 Cliproxy 参数名一致，都是 region-XX）

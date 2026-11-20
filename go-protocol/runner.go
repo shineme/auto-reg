@@ -275,7 +275,8 @@ func (r *ProtocolRunner) workerLoop(ctx context.Context, cfg Config, workerID in
 		r.emitLog("error", fmt.Sprintf("[%d] 代理配置错误: %s", workerID, err.Error()))
 		return
 	}
-	dialer.SetOptions(splitRegions(cfg.ProxyRegionRotate), cfg.ProxySessTime, parseProxyStyle(cfg.ProxyStyle), cfg.ProxyState, cfg.StickyEnabled())
+	dialer.SetOptionsEx(splitRegions(cfg.ProxyRegionRotate), cfg.ProxySessTime, parseProxyStyle(cfg.ProxyStyle),
+		cfg.ProxyState, cfg.StickyEnabled(), cfg.ProxyRotateSession)
 	if len(splitRegions(cfg.ProxyRegionRotate)) > 0 {
 		r.emitLog("info", fmt.Sprintf("[%d] 代理区域轮换已启用: %s（风格=%s, sessTime=%d 分钟, sticky=%v）", workerID, cfg.ProxyRegionRotate, cfg.ProxyStyle, cfg.ProxySessTime, cfg.StickyEnabled()))
 	}

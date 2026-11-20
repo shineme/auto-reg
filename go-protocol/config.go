@@ -37,6 +37,8 @@ type Config struct {
 	ProxyState string `json:"proxyState"`
 	// ProxySticky: nil 或 true=sticky 会话；false=Rotating（每请求换 IP）。
 	ProxySticky *bool `json:"proxySticky,omitempty"`
+	// ProxyRotateSession: 忽略代理地址里写死的 session/sid，每次轮换都换新出口 IP。
+	ProxyRotateSession bool `json:"proxyRotateSession,omitempty"`
 	// ProxySubscriptionURL: 订阅地址（Clash YAML / base64 链接列表均可）。
 	ProxySubscriptionURL string `json:"proxySubscriptionUrl"`
 	// ProxyPoolFile: 节点池本地文件路径，留空=输出目录/proxy-pool.json。
@@ -351,6 +353,9 @@ func parseProxyStyle(name string) ProxyStyle {
 	case "711":
 		return Style711
 	case "clipproxy":
+		return StyleClipProxy
+	case "zooproxy", "zoo":
+		// zooproxy 用的是与 cliproxy 一样的 sid- / t- / region- 参数体系。
 		return StyleClipProxy
 	default:
 		return StyleAuto

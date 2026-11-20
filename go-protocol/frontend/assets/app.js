@@ -12,6 +12,7 @@
     "mailDomain", "mailPrefix", "imapHost", "imapPort", "imapUser", "imapPassword",
     "hotmailRaw", "hotmailPool", "hotmailPreflightWorkers",
     "proxyUrl", "proxyRegionRotate", "proxySessTime", "proxyStyle", "proxyState", "proxySticky",
+    "proxyRotateSession",
     "proxySubscriptionUrl", "proxyPoolFile", "proxyPoolUse", "proxyPoolWorkers", "proxyLocalPorts",
     "fixedPassword", "ticketMode", "externalTicketUrl",
     "signatureSalt", "yySuffix", "recaptchaSiteKey", "chromePath", "outputDir"
@@ -698,6 +699,7 @@
     { id: "signinAfterRegister", title: "注册后自动签到", sec: "task" },
     { id: "hotmailPool", title: "号池文件路径", sec: "mail" },
     { id: "proxyUrl", title: "代理地址", sec: "proxy" },
+    { id: "proxyRotateSession", title: "强制换新会话", sec: "proxy" },
     { id: "proxyPoolUse", title: "使用节点池", sec: "proxy" },
     { id: "proxySubscriptionUrl", title: "订阅地址（可多行）", sec: "proxy" },
     { id: "fixedPassword", title: "固定密码", sec: "adv" },

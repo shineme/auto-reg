@@ -325,6 +325,7 @@
                 <option value="auto">自动识别（cliproxy / 711）</option>
                 <option value="711">711（session- + sessTime-）</option>
                 <option value="clipproxy">Cliproxy（sid- + t- + st-）</option>
+                <option value="zooproxy">ZooProxy（sid- + t- + region-）</option>
               </select>
             </div>
             <div class="field"><label for="proxyState">Cliproxy 州省 <em>可选</em></label><input id="proxyState" placeholder="留空=不限" spellcheck="false" /></div>
@@ -332,6 +333,7 @@
             <div class="field"><label for="proxySessTime">Sticky 时长 <em>分钟 5-180</em></label><input id="proxySessTime" type="number" min="0" max="180" placeholder="0=默认" /></div>
           </div>
           <label class="switch"><input type="checkbox" id="proxySticky" /><span class="track"></span><span class="sw-text">启用 Sticky 会话<em>关闭=每请求换 IP</em></span></label>
+          <label class="switch"><input type="checkbox" id="proxyRotateSession" /><span class="track"></span><span class="sw-text">每次尝试强制换新会话<em>忽略地址里写死的 sid，换新出口 IP</em></span></label>
           <div class="field" style="margin-top:8px;"><label for="proxySubscriptionUrl">订阅地址 <em>可多行，每行一个（Clash YAML / base64 链接列表）</em></label><textarea id="proxySubscriptionUrl" rows="3" placeholder="https://…/sub?token=…&#10;https://…/another-sub?token=…" spellcheck="false"></textarea></div>
           <div class="grid2">
             <div class="field"><label for="proxyPoolFile">节点池文件路径</label><input id="proxyPoolFile" placeholder="留空=输出目录/proxy-pool.json" spellcheck="false" /></div>
