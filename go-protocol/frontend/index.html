@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MiniMax 纯 Go 协议注册器</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --ok: #22c55e;
+      --err: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 16px;
+      font-size: 13px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 440px 1fr;
+      gap: 14px;
+      height: calc(100vh - 32px);
+    }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      overflow-y: auto;
+    }
+    h2 {
+      margin: 0 0 10px;
+      font-size: 15px;
+      color: var(--accent);
+    }
+    .grid2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+    }
+    label span {
+      display: block;
+      color: var(--muted);
+      margin-bottom: 3px;
+      font-size: 12px;
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-top: 18px;
+    }
+    .checkbox-row span { margin-bottom: 0; }
+    .checkbox-row input { width: auto; }
+    input, select, textarea {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+      font-family: inherit;
+    }
+    textarea { resize: vertical; min-height: 76px; }
+    .row-btns {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 8px 0;
+    }
+    button {
+      border: none;
+      border-radius: 6px;
+      padding: 7px 12px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      background: #334155;
+      color: var(--text);
+    }
+    button.primary { background: #0284c7; color: #fff; }
+    button.danger { background: #dc2626; color: #fff; }
+    button.ok { background: #16a34a; color: #fff; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .stat {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .stat .k { color: var(--muted); font-size: 11px; }
+    .stat .v { font-size: 18px; font-weight: 700; margin-top: 2px; }
+    .bar {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .logs {
+      background: #0b1220;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      height: 250px;
+      overflow-y: auto;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+    .log-error { color: #f87171; }
+    .log-info { color: #cbd5e1; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th, td {
+      text-align: left;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 600; }
+    .badge-ok { color: var(--ok); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="panel">
+      <h2>纯 Go 协议配置（零 Node.js）</h2>
+      <div class="grid2">
+        <label><span>面板地址</span><input id="panelBase" /></label>
+        <label><span>面板密码 / Key</span><input id="panelKey" type="password" /></label>
+      </div>
+      <div class="grid2">
+        <label><span>面板 2 地址（可选，多路时交替分担）</span><input id="panel2Base" placeholder="留空则只用主面板" /></label>
+        <label><span>面板 2 密码 / Key</span><input id="panel2Key" type="password" /></label>
+      </div>
+      <div class="grid2">
+        <label>
+          <span>接码模式</span>
+          <select id="mailMode">
+            <option value="hotmail">Hotmail Graph 号池</option>
+            <option value="imap">域名邮箱 + IMAP</option>
+          </select>
+        </label>
+        <label><span>目标成功数量</span><input id="count" type="number" min="1" max="5000" /></label>
+      </div>
+
+      <div class="grid2">
+        <label><span>并行线路数（1-16）</span><input id="workers" type="number" min="1" max="16" /></label>
+        <label class="checkbox-row"><span>验证码页面直连（代理不稳时勾选）</span><input id="captchaDirect" type="checkbox" /></label>
+      </div>
+      <div class="grid2">
+        <label class="checkbox-row"><span>邮箱取码走代理（默认直连，代理失效时别勾）</span><input id="mailViaProxy" type="checkbox" /></label>
+        <label class="checkbox-row"><span>注册后自动签到领积分（MiniMax Code 每日签到）</span><input id="signinAfterRegister" type="checkbox" /></label>
+      </div>
+      <div class="grid2">
+        <label><span>签到时区（timezone_id）</span><input id="timezoneId" placeholder="Asia/Shanghai" /></label>
+        <div class="row-btns"><button id="btnCheckinAll">批量补签</button><button id="btnMailScan">批量收信</button></div>
+      </div>
+
+      <div id="imapBox">
+        <div class="grid2">
+          <label><span>邮箱域名</span><input id="mailDomain" /></label>
+          <label><span>邮箱前缀</span><input id="mailPrefix" /></label>
+        </div>
+        <div class="grid2">
+          <label><span>IMAP 主机</span><input id="imapHost" /></label>
+          <label><span>IMAP 端口</span><input id="imapPort" type="number" /></label>
+        </div>
+        <div class="grid2">
+          <label><span>IMAP 账号</span><input id="imapUser" /></label>
+          <label><span>IMAP 授权码</span><input id="imapPassword" type="password" /></label>
+        </div>
+      </div>
+
+      <div id="hotmailBox">
+        <label><span>Hotmail Graph 文本（email----pass----clientId----refreshToken）</span>
+          <textarea id="hotmailRaw" placeholder="粘贴 Hotmail 账号行后点击“导入号池”"></textarea></textarea>
+          <div id="rawCount" style="color: var(--muted); font-size: 12px; margin-top: 4px;">已粘贴 0 行 / 0 字符</div>
+          <div class="row-btns" style="margin-top:6px;">
+            <input type="file" id="rawFile" accept=".txt" style="font-size:12px; max-width:260px;" />
+            <button id="btnImportFile">选择文件并导入</button>
+          </div>
+        </label>
+        <div class="grid2">
+          <label><span>号池文件路径</span><input id="hotmailPool" /></label>
+          <label><span>测活并发线程</span><input id="hotmailPreflightWorkers" type="number" min="1" max="32" /></label>
+        </div>
+        <div class="row-btns">
+          <button id="btnImport">导入号池</button>
+          <button id="btnPreflight">多线程测活</button>
+          <button id="btnRemoveSkipped">一键移除失效</button>
+        </div>
+        <div id="poolStatus" style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">号池状态：未加载</div>
+      </div>
+
+      <label><span>代理地址（支持 socks5:// / http:// / 紧凑格式）</span><input id="proxyUrl" placeholder="留空直连" /></label>
+      <div class="grid2">
+        <label>
+          <span>代理区域轮换（711，逗号分隔）</span>
+          <input id="proxyRegionRotate" placeholder="如 JP,US,GB；留空=不换区域" />
+        </label>
+        <label>
+          <span>Sticky 会话时长（分钟，5-180）</span>
+          <input id="proxySessTime" type="number" min="0" max="180" placeholder="0=默认" />
+        </label>
+      </div>
+      <div class="grid2">
+        <label>
+          <span>代理商家类型（参数体系）</span>
+          <select id="proxyStyle">
+            <option value="auto">自动识别（cliproxy / 711）</option>
+            <option value="711">711（session- + sessTime-）</option>
+            <option value="clipproxy">Cliproxy（sid- + t- + st-）</option>
+          </select>
+        </label>
+        <label>
+          <span>Cliproxy 州省（可选，如 Louisiana）</span>
+          <input id="proxyState" placeholder="留空=不限州省" />
+        </label>
+      </div>
+      <label><span><input type="checkbox" id="proxySticky" checked style="width:auto;" /> 启用 Sticky 会话（关闭=每请求换 IP）</span></label>
+      <div class="grid2">
+        <label>
+          <span>订阅地址（Clash YAML / base64 链接列表）</span>
+          <input id="proxySubscriptionUrl" placeholder="https://.../sub?token=..." />
+        </label>
+        <label>
+          <span>节点池文件路径</span>
+          <input id="proxyPoolFile" placeholder="留空=输出目录/proxy-pool.json" />
+        </label>
+      </div>
+      <div class="grid2">
+        <label>
+          <span>测活并发线程</span>
+          <input id="proxyPoolWorkers" type="number" min="1" max="64" />
+        </label>
+        <label>
+          <span>本地代理端口池（如 18001-18165，每端口一个出口 IP）</span>
+          <input id="proxyLocalPorts" placeholder="如 18001-18165，或 18001,18002" />
+        </label>
+        <label>
+          <span>使用节点池（每次尝试轮换出口 IP）</span>
+          <input type="checkbox" id="proxyPoolUse" style="width:auto;" />
+        </label>
+      </div>
+      <div class="row-btns">
+        <button id="btnFetchSub">拉取订阅</button>
+        <button id="btnCheckPool">节点测活</button>
+        <button id="btnPoolStats">刷新状态</button>
+      </div>
+      <div id="poolStats" style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">节点池：未加载</div>
+      <label><span>固定密码（留空=每账号随机强密码；填写则全部账号共用，用于排查 1200058）</span><input id="fixedPassword" type="text" placeholder="如 DD890528@?" /></label>
+
+      <div class="grid2">
+        <label>
+          <span>票据模式</span>
+          <select id="ticketMode">
+            <option value="cdp">纯 Go CDP 取票（无 Node）</option>
+            <option value="external">外部票据接口（无浏览器）</option>
+          </select>
+        </label>
+        <label><span>外部票据接口 URL</span><input id="externalTicketUrl" placeholder="http://127.0.0.1:9000/ticket" /></label>
+      </div>
+
+      <div class="grid2">
+        <label><span>SIGNATURE_SALT</span><input id="signatureSalt" type="password" /></label>
+        <label><span>YY_SUFFIX</span><input id="yySuffix" type="password" /></label>
+      </div>
+      <div class="grid2">
+        <label><span>RECAPTCHA_SITE_KEY</span><input id="recaptchaSiteKey" /></label>
+        <label><span>Chrome 路径</span><input id="chromePath" /></label>
+      </div>
+      <label><span>输出目录</span><input id="outputDir" /></label>
+
+      <div class="row-btns">
+        <button id="btnSave">保存配置</button>
+        <button id="btnTestPanel">测试面板连接</button>
+        <button id="btnStart" class="ok">开始纯 Go 注册</button>
+        <button id="btnStop" class="danger" disabled>停止任务</button>
+        <button id="btnSupStart" class="ok">开始监督批量（异常自动续跑）</button>
+        <button id="btnSupStop" class="danger">停止监督</button>
+        <button id="btnClear">清理历史记录</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>实时运行状态</h2>
+      <div class="stats">
+        <div class="stat"><div class="k">已成功</div><div class="v" id="stOk">0</div></div>
+        <div class="stat"><div class="k">目标数</div><div class="v" id="stTarget">0</div></div>
+        <div class="stat"><div class="k">失败尝试</div><div class="v" id="stFail">0</div></div>
+        <div class="stat"><div class="k">状态</div><div class="v" id="stRun" style="font-size:14px;">待机</div></div>
+      </div>
+      <div class="bar">
+        <div>当前阶段：<strong id="stStage">未开始</strong></div>
+        <div style="color:var(--muted)" id="stEmail">-</div>
+      </div>
+      <div class="logs" id="logs"></div>
+      <h2>已成功绑定账号</h2>
+      <table>
+        <thead>
+          <tr><th>#</th><th>邮箱</th><th>面板账号</th><th>设备码</th><th>时间</th></tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+
+      <h2 style="margin-top:16px;">收件箱浏览（实时）</h2>
+      <div class="grid2">
+        <label><span>选邮箱（号池）</span><input id="mailInboxEmail" list="mailEmailList" placeholder="输入/选择一个邮箱" /></label>
+        <datalist id="mailEmailList"></datalist>
+      </div>
+      <div class="row-btns">
+        <button id="btnMailOpen" class="primary">打开收件箱</button>
+        <span id="mailInboxNote" style="color:var(--muted);font-size:12px;"></span>
+      </div>
+      <div id="mailInboxList" style="max-height:260px;overflow-y:auto;background:#0b1220;border:1px solid var(--border);border-radius:8px;padding:6px;margin-bottom:8px;"></div>
+      <div id="mailMsgBody" style="max-height:300px;overflow:auto;background:#0b1220;border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12px;line-height:1.5;"></div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const fields = [
+      "panelBase", "panelKey", "panel2Base", "panel2Key", "mailMode", "count", "workers", "captchaDirect", "mailViaProxy",
+      "signinAfterRegister", "timezoneId",
+      "mailDomain", "mailPrefix", "imapHost", "imapPort", "imapUser", "imapPassword",
+      "hotmailRaw", "hotmailPool", "hotmailPreflightWorkers",
+      "proxyUrl", "proxyRegionRotate", "proxySessTime", "proxyStyle", "proxyState", "proxySticky",
+      "proxySubscriptionUrl", "proxyPoolFile", "proxyPoolUse", "proxyPoolWorkers", "proxyLocalPorts", "fixedPassword", "ticketMode", "externalTicketUrl",
+      "signatureSalt", "yySuffix", "recaptchaSiteKey", "chromePath", "outputDir"
+    ];
+
+    function appendLog(level, message, time) {
+      const box = $("logs");
+      const div = document.createElement("div");
+      div.className = level === "error" ? "log-error" : "log-info";
+      div.textContent = `[${time || new Date().toTimeString().slice(0, 8)}] [${level}] ${message}`;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function readForm() {
+      const cfg = {};
+      for (const f of fields) {
+        const el = $(f);
+        if (!el) continue;
+        if (el.type === "checkbox") {
+          cfg[f] = el.checked;
+        } else {
+          cfg[f] = el.type === "number" ? Number(el.value || 0) : el.value;
+        }
+      }
+      return cfg;
+    }
+
+    function writeForm(cfg) {
+      if (!cfg || typeof cfg !== "object") return;
+      for (const f of fields) {
+        if ($(f) && cfg[f] !== undefined && cfg[f] !== null) {
+          if ($(f).type === "checkbox") {
+            $(f).checked = Boolean(cfg[f]);
+          } else {
+            $(f).value = cfg[f];
+          }
+        }
+      }
+      toggleMailMode();
+    }
+
+    function toggleMailMode() {
+      const isHotmail = $("mailMode").value === "hotmail";
+      $("hotmailBox").style.display = isHotmail ? "block" : "none";
+      $("imapBox").style.display = isHotmail ? "none" : "block";
+    }
+
+    function renderPoolStats(st) {
+      if (!st) return;
+      $("poolStatus").textContent = `号池总计 ${st.total} | 可用 ${st.available} | 已用 ${st.used} | 失效/跳过 ${st.skipped} | 处理中 ${st.reserved}`;
+    }
+
+    async function loadMailEmails() {
+      try {
+        const emails = await window.go.main.App.MailListOptions(readForm());
+        const dl = $("mailEmailList");
+        dl.innerHTML = "";
+        for (const e of (emails || [])) {
+          const opt = document.createElement("option");
+          opt.value = e;
+          dl.appendChild(opt);
+        }
+      } catch (err) {
+        // 静默：下拉填充失败不影响主流程
+      }
+    }
+
+    function esc(s) {
+      return String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+
+    function renderMailInbox(view) {
+      const box = $("mailInboxList");
+      box.innerHTML = "";
+      if (view.error) {
+        box.innerHTML = `<div class="log-error">${esc(view.error)}</div>`;
+      }
+      const items = view.items || [];
+      if (items.length === 0 && !view.error) {
+        box.innerHTML = `<div style="color:var(--muted);padding:8px;">收件箱与垃圾箱都没有邮件</div>`;
+      }
+      for (const it of items) {
+        const row = document.createElement("div");
+        row.style.cssText = "padding:6px 8px;border-bottom:1px solid var(--border);cursor:pointer;";
+        const tag = it.folder === "junkemail" ? "🗑 垃圾箱" : "📥 收件箱";
+        row.innerHTML =
+          `<div style="display:flex;justify-content:space-between;gap:8px;">` +
+          `<strong style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(it.subject || "(无主题)")}</strong>` +
+          `<span style="color:var(--muted);white-space:nowrap;">${esc((it.receivedAt || "").slice(5, 16))}</span></div>` +
+          `<div style="color:var(--muted);font-size:11px;margin-top:2px;">${esc(it.from)} · ${tag}${it.isRead ? "" : " · <span style='color:#38bdf8;'>未读</span>"}</div>`;
+        row.addEventListener("click", () => openMailMessage(it));
+        box.appendChild(row);
+      }
+    }
+
+    async function openMailMessage(it) {
+      const email = $("mailInboxEmail").value;
+      const bodyBox = $("mailMsgBody");
+      bodyBox.innerHTML = `<div style="color:var(--muted);padding:6px;">正在加载正文 ${esc(it.id)} …</div>`;
+      try {
+        const msg = await window.go.main.App.MailMessageView(readForm(), email, it.id);
+        let html = msg.bodyHtml || "";
+        if (!html && msg.bodyText) html = "<pre style='white-space:pre-wrap;'>" + esc(msg.bodyText) + "</pre>";
+        bodyBox.innerHTML =
+          `<div style="margin-bottom:6px;color:var(--accent);font-weight:600;">${esc(msg.subject || "(无主题)")}</div>` +
+          `<div style="color:var(--muted);font-size:11px;margin-bottom:8px;">发件人 ${esc(msg.from)} ｜ 收件人 ${esc(msg.to)} ｜ ${esc((msg.receivedAt || "").slice(5, 16))}</div>` +
+          `<div style="border-top:1px solid var(--border);padding-top:8px;">${html}</div>`;
+      } catch (e) {
+        bodyBox.innerHTML = `<div class="log-error">加载正文失败: ${esc(e && e.message ? e.message : e)}</div>`;
+      }
+    }
+
+    function renderSummary(s) {
+      if (!s) return;
+      $("stOk").textContent = s.succeeded || 0;
+      $("stTarget").textContent = s.target || 0;
+      $("stFail").textContent = s.failedAttempts || 0;
+      $("stRun").textContent = s.running ? "运行中" : "已停止";
+      $("stStage").textContent = s.currentStage || "待机";
+      $("stEmail").textContent = s.currentEmail || "-";
+      $("btnStart").disabled = !!s.running;
+      $("btnStop").disabled = !s.running;
+      const tbody = $("resultsBody");
+      tbody.innerHTML = "";
+      const list = Array.isArray(s.results) ? s.results : [];
+      for (let i = list.length - 1; i >= 0; i--) {
+        const r = list[i];
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${i + 1}</td><td>${r.email}</td><td class="badge-ok">${r.providerName || ""}</td><td>${r.userCode || ""}</td><td>${(r.createdAt || "").slice(11, 19)}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function init() {
+      let cfg = null;
+      try {
+        cfg = await window.go.main.App.GetConfig();
+        writeForm(cfg);
+      } catch (e) {
+        appendLog("error", "加载配置失败: " + (e && e.message ? e.message : e));
+      }
+      try {
+        const stats = await window.go.main.App.GetHotmailStats(cfg || readForm());
+        renderPoolStats(stats);
+      } catch (e) {
+        appendLog("error", "读取号池失败: " + (e && e.message ? e.message : e));
+      }
+      try {
+        const sum = await window.go.main.App.GetProgress();
+        renderSummary(sum);
+      } catch (e) {
+        appendLog("error", "读取进度失败: " + (e && e.message ? e.message : e));
+      }
+      if (window.runtime && window.runtime.EventsOn) {
+        window.runtime.EventsOn("batch:log", (p) => appendLog(p.level, p.message, p.time));
+        window.runtime.EventsOn("batch:progress", (s) => renderSummary(s));
+        window.runtime.EventsOn("hotmail:preflight", (p) => {
+          $("poolStatus").textContent = `测活进度：${p.checked}/${p.total}（可用 ${p.available}，失效 ${p.skipped}）`;
+        });
+      }
+      loadMailEmails();
+    }
+
+    $("mailMode").addEventListener("change", toggleMailMode);
+    $("btnSave").addEventListener("click", async () => {
+      try {
+        const saved = await window.go.main.App.SaveConfig(readForm());
+        writeForm(saved);
+        appendLog("info", "配置已保存");
+      } catch (e) { appendLog("error", String(e)); }
+    });
+    $("btnTestPanel").addEventListener("click", async () => {
+      try {
+        const msg = await window.go.main.App.TestPanel(readForm());
+        appendLog("info", msg);
+      } catch (e) { appendLog("error", "面板测试失败: " + e); }
+    });
+    function updateRawCount() {
+      const v = $("hotmailRaw").value || "";
+      const all = v ? v.replace(/\r\n/g, "\n").split("\n").filter((l) => l.trim()) : [];
+      const lines = all.length;
+      // 有效行：至少 4 段以 ---- 分隔且包含 @ 的邮箱
+      const valid = all.filter((l) => {
+        const f = l.split("----");
+        return f.length >= 4 && f[0].includes("@") && f[1].trim() && f[2].trim();
+      }).length;
+      const hint = lines >= 50 && valid < lines * 0.9
+        ? " ⚠ 有行数少于预期，可能剪贴不完整，建议用“选择文件并导入”"
+        : "";
+      $("rawCount").textContent = `已粘贴 ${lines} 行 / 识别有效 ${valid} 条 / ${v.length} 字符${hint}`;
+      return lines;
+    }
+    $("hotmailRaw").addEventListener("input", updateRawCount);
+    $("hotmailRaw").addEventListener("paste", () => setTimeout(updateRawCount, 0));
+
+    $("btnImport").addEventListener("click", async () => {
+      try {
+        const n = updateRawCount();
+        if (n === 0) { appendLog("error", "号池文本为空，请粘贴内容或选择文件导入"); return; }
+        appendLog("info", `正在导入 ${n} 行账号文本...`);
+        const st = await window.go.main.App.ImportHotmail(readForm());
+        renderPoolStats(st);
+      } catch (e) { appendLog("error", "导入失败: " + e); }
+    });
+
+    function renderPoolStats(st) {
+      if (!st) return;
+      $("poolStats").textContent = `节点池：共 ${st.total} 个，存活 ${st.alive}，失效 ${st.dead}${st.checked ? `，本次测活 ${st.checked}` : ""}`;
+    }
+    $("btnFetchSub").addEventListener("click", async () => {
+      try {
+        appendLog("info", "正在拉取订阅...");
+        const st = await window.go.main.App.ImportProxySubscription(readForm());
+        renderPoolStats(st);
+        appendLog("info", `订阅拉取完成：${st.total} 个节点`);
+      } catch (e) { appendLog("error", "拉取订阅失败: " + e); }
+    });
+    $("btnCheckPool").addEventListener("click", async () => {
+      try {
+        appendLog("info", "正在测活节点...");
+        const st = await window.go.main.App.CheckProxyPool(readForm());
+        renderPoolStats(st);
+        appendLog("info", `测活完成：存活 ${st.alive} / ${st.total}`);
+      } catch (e) { appendLog("error", "节点测活失败: " + e); }
+    });
+    $("btnPoolStats").addEventListener("click", async () => {
+      try {
+        const st = await window.go.main.App.GetProxyPoolStats(readForm());
+        renderPoolStats(st);
+      } catch (e) { appendLog("error", "读取节点池失败: " + e); }
+    });
+    $("btnImportFile").addEventListener("click", async () => {
+      const f = $("rawFile").files && $("rawFile").files[0];
+      if (!f) { appendLog("error", "请先选择 .txt 号池文件"); return; }
+      try {
+        appendLog("info", `正在上传 ${f.name} (${f.size} 字节) 到服务器...`);
+        const fd = new FormData();
+        fd.append("file", f);
+        const token = (new URLSearchParams(location.search)).get("token") || "";
+        const resp = await fetch("/api/upload" + (token ? "?token=" + encodeURIComponent(token) : ""), { method: "POST", body: fd });
+        const up = await resp.json();
+        if (up.error) throw new Error(up.error);
+        appendLog("info", `上传完成：${up.lines} 行，已存入 ${up.path}，开始导入...`);
+        const cfg = readForm();
+        const st = await window.go.main.App.ImportHotmailFile(cfg, up.path);
+        renderPoolStats(st);
+        appendLog("info", `导入完成：新增 ${st.available + st.used + st.reserved - 0} / 总计 ${st.total}`);
+      } catch (e) { appendLog("error", "文件导入失败: " + e); }
+    });
+    $("btnPreflight").addEventListener("click", async () => {
+      try {
+        appendLog("info", "开始多线程测活...");
+        const st = await window.go.main.App.PreflightHotmail(readForm());
+        renderPoolStats(st);
+        appendLog("info", `测活完成：可用 ${st.available}，失效 ${st.skipped}`);
+      } catch (e) { appendLog("error", "测活失败: " + e); }
+    });
+    $("btnRemoveSkipped").addEventListener("click", async () => {
+      try {
+        const st = await window.go.main.App.RemoveSkippedHotmail(readForm());
+        renderPoolStats(st);
+        appendLog("info", "已移除失效账号");
+      } catch (e) { appendLog("error", String(e)); }
+    });
+    $("btnCheckinAll").addEventListener("click", async () => {
+      try {
+        appendLog("info", "开始批量补签...");
+        const msg = await window.go.main.App.CheckinAll(readForm());
+        appendLog("info", msg);
+      } catch (e) { appendLog("error", "批量补签失败: " + (e && e.message ? e.message : e)); }
+    });
+    $("btnMailScan").addEventListener("click", async () => {
+      try {
+        appendLog("info", "开始批量收信扫描...");
+        const msg = await window.go.main.App.MailScanAll(readForm());
+        appendLog("info", msg);
+        loadMailEmails();
+      } catch (e) { appendLog("error", "批量收信失败: " + (e && e.message ? e.message : e)); }
+    });
+    $("btnMailOpen").addEventListener("click", async () => {
+      const email = $("mailInboxEmail").value.trim();
+      if (!email) {
+        $("mailInboxNote").textContent = "请先在上方选一个邮箱";
+        return;
+      }
+      $("mailInboxNote").textContent = "加载中…";
+      $("mailInboxList").innerHTML = "";
+      $("mailMsgBody").innerHTML = "";
+      try {
+        const view = await window.go.main.App.MailInboxView(readForm(), email);
+        renderMailInbox(view);
+        const n = (view.items || []).length;
+        $("mailInboxNote").textContent = n > 0 ? `共 ${n} 封（含垃圾箱）` : "（空）";
+      } catch (e) {
+        $("mailInboxNote").textContent = "加载失败";
+        $("mailInboxList").innerHTML = `<div class="log-error">${esc(e && e.message ? e.message : e)}</div>`;
+      }
+    });
+    $("btnStart").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.StartBatch(readForm());
+        appendLog("info", "已启动纯 Go 协议批量注册");
+      } catch (e) { appendLog("error", "启动失败: " + e); }
+    });
+    $("btnStop").addEventListener("click", async () => {
+      await window.go.main.App.StopBatch();
+      appendLog("info", "已发送停止信号");
+    });
+    $("btnSupStart").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.StartSupervised(readForm());
+        appendLog("info", "已启动监督批量（异常自动重启续跑，直到达标/号池耗尽/点停止）");
+      } catch (e) { appendLog("error", "监督批量启动失败: " + e); }
+    });
+    $("btnSupStop").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.StopSupervised();
+        appendLog("info", "已停止监督批量");
+      } catch (e) { appendLog("error", "停止监督失败: " + e); }
+    });
+    $("btnClear").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.ClearHistory(readForm());
+        renderSummary({ succeeded: 0, target: Number($("count").value || 0), failedAttempts: 0, running: false, results: [] });
+        appendLog("info", "已清理历史记录");
+      } catch (e) { appendLog("error", String(e)); }
+    });
+
+    window.addEventListener("DOMContentLoaded", init);
+  </script>
+</body>
+</html>
+
+

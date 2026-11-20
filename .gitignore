@@ -39,3 +39,18 @@ Thumbs.db
 
 # Design tooling metadata is not runtime state; keep it tracked.
 !.impeccable/
+
+# Go protocol version (pure Go + Wails)
+go-protocol/build/
+go-protocol/artifacts/
+go-protocol/*.exe
+go-protocol/wailsjs/
+
+# Local helper scripts / node data (may contain credentials)
+vps-*.py
+web-*-test.py
+singlebox-*.yaml
+singlebox-*.txt
+cliproxy-*.html
+cliproxy-*.txt
+gen-singbox.py

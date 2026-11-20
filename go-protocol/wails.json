@@ -1,0 +1,10 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "minimax-go-protocol",
+  "outputfilename": "minimax-go-protocol",
+  "wailsjsdir": "./frontend",
+  "author": {
+    "name": "",
+    "email": ""
+  }
+}
