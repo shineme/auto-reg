@@ -54,3 +54,17 @@ singlebox-*.txt
 cliproxy-*.html
 cliproxy-*.txt
 gen-singbox.py
+
+_prov*.json
+prov*.json
+_cj.txt
+artifacts/
+*.log
+
+prov*.json
+_prov*.json
+vps-*.json
+singbox-*.json
+*.log
+artifacts/
+_cj.txt

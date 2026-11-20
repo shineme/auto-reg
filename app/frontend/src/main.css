@@ -80,8 +80,9 @@ button { color: inherit; }
 .field > span { color: #b9c6dc; font-size: 12px; }
 .field input, .field textarea { width: 100%; border: 1px solid var(--line); border-radius: 9px; background: #0f1622; color: var(--text); padding: 10px 12px; transition: border-color 150ms ease-out, background 150ms ease-out, box-shadow 150ms ease-out; }
 .field textarea { resize: vertical; min-height: 80px; font-family: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, monospace; font-size: 12px; line-height: 1.5; }
-.field input:hover, .field textarea:hover { border-color: #344663; }
-.field input:focus, .field textarea:focus { border-color: var(--accent-strong); background: #101b29; outline: none; box-shadow: 0 0 0 3px var(--focus); }
+.field select { width: 100%; border: 1px solid var(--line); border-radius: 9px; background: #0f1622; color: var(--text); padding: 10px 12px; }
+.field input:hover, .field textarea:hover, .field select:hover { border-color: #344663; }
+.field input:focus, .field textarea:focus, .field select:focus { border-color: var(--accent-strong); background: #101b29; outline: none; box-shadow: 0 0 0 3px var(--focus); }
 .field input::placeholder, .field textarea::placeholder { color: var(--faint); }
 .hint { margin: 14px 0 0; color: var(--faint); font-size: 12px; }
 .hint code, .proxy-examples code { color: #b9c6dc; background: #0b111b; border: 1px solid var(--line-soft); border-radius: 6px; padding: 2px 6px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 11px; }
@@ -148,3 +149,8 @@ td:nth-child(2), td:nth-child(4) { font-family: ui-monospace, "Cascadia Mono", C
   .span-2 { grid-column: auto; }
   .actions { display: grid; grid-template-columns: 1fr 1fr; }
 }
+
+.hotmail-progress { margin: 12px 0 4px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 12px; background: #0b111b; }
+.hotmail-progress .progress-meta { margin-bottom: 8px; }
+.hotmail-progress .progress-detail { margin-top: 8px; }
+

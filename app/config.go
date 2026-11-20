@@ -12,37 +12,48 @@ import (
 )
 
 type Config struct {
-	PanelBase    string `json:"panelBase"`
-	PanelKey     string `json:"panelKey"`
-	MailDomain   string `json:"mailDomain"`
-	MailPrefix   string `json:"mailPrefix"`
-	Mailbox      string `json:"mailbox"`
-	ImapHost     string `json:"imapHost"`
-	ImapPort     int    `json:"imapPort"`
-	ImapUser     string `json:"imapUser"`
-	ImapPassword string `json:"imapPassword"`
-	ProxyURL     string `json:"proxyUrl"`
-	Count        int    `json:"count"`
-	ChromePath   string `json:"chromePath"`
-	OutputDir    string `json:"outputDir"`
-	ScriptsDir   string `json:"scriptsDir"`
+	PanelBase               string   `json:"panelBase"`
+	PanelKey                string   `json:"panelKey"`
+	MailMode                string   `json:"mailMode"`
+	MailDomain              string   `json:"mailDomain"`
+	MailPrefix              string   `json:"mailPrefix"`
+	Mailbox                 string   `json:"mailbox"`
+	ImapHost                string   `json:"imapHost"`
+	ImapPort                int      `json:"imapPort"`
+	ImapUser                string   `json:"imapUser"`
+	ImapPassword            string   `json:"imapPassword"`
+	HotmailRaw              string   `json:"hotmailRaw"`
+	HotmailPool             string   `json:"hotmailPool"`
+	HotmailPreflightWorkers int      `json:"hotmailPreflightWorkers"`
+	ProxyURL                string   `json:"proxyUrl"`
+	ProxyDirectHosts        []string `json:"proxyDirectHosts"`
+	Count                   int      `json:"count"`
+	Workers                 int      `json:"workers"`
+	ChromePath              string   `json:"chromePath"`
+	OutputDir               string   `json:"outputDir"`
+	ScriptsDir              string   `json:"scriptsDir"`
 }
 
 func DefaultConfig() Config {
 	workspace := detectWorkspace()
 	return Config{
-		PanelBase:  "https://panel.example.com",
-		MailDomain: "example.com",
-		MailPrefix: "mm",
-		Mailbox:    "mailbox@example.com",
-		ImapHost:   "imap.example.com",
-		ImapPort:   993,
-		ImapUser:   "mailbox@example.com",
-		ProxyURL:   "",
-		Count:      1,
-		ChromePath: `C:\Program Files\Google\Chrome\Application\chrome.exe`,
-		OutputDir:  filepath.Join(workspace, "artifacts", "gui-batch"),
-		ScriptsDir: filepath.Join(workspace, "scripts"),
+		PanelBase:               "https://panel.example.com",
+		MailMode:                "imap",
+		MailDomain:              "example.com",
+		MailPrefix:              "mm",
+		Mailbox:                 "mailbox@example.com",
+		ImapHost:                "imap.example.com",
+		ImapPort:                993,
+		ImapUser:                "mailbox@example.com",
+		HotmailRaw:              "",
+		HotmailPool:             "",
+		HotmailPreflightWorkers: 8,
+		ProxyURL:                "",
+		Count:                   1,
+		Workers:                 8,
+		ChromePath:              `C:\Program Files\Google\Chrome\Application\chrome.exe`,
+		OutputDir:               filepath.Join(workspace, "artifacts", "gui-batch"),
+		ScriptsDir:              filepath.Join(workspace, "scripts"),
 	}
 }
 
@@ -95,6 +106,15 @@ func (cfg *Config) applyDefaults() {
 	if cfg.PanelBase == "" {
 		cfg.PanelBase = defaults.PanelBase
 	}
+	if cfg.MailMode == "" {
+		cfg.MailMode = defaults.MailMode
+	}
+	cfg.MailMode = strings.ToLower(strings.TrimSpace(cfg.MailMode))
+	if cfg.MailMode != "hotmail" && cfg.MailMode != "hotmail-graph" {
+		cfg.MailMode = "imap"
+	} else {
+		cfg.MailMode = "hotmail"
+	}
 	if cfg.MailDomain == "" {
 		cfg.MailDomain = defaults.MailDomain
 	}
@@ -110,6 +130,12 @@ func (cfg *Config) applyDefaults() {
 	if cfg.Count <= 0 {
 		cfg.Count = defaults.Count
 	}
+	if cfg.Workers <= 0 {
+		cfg.Workers = defaults.Workers
+	}
+	if cfg.Workers > 8 {
+		cfg.Workers = 8
+	}
 	if cfg.ChromePath == "" {
 		cfg.ChromePath = defaults.ChromePath
 	}
@@ -119,21 +145,60 @@ func (cfg *Config) applyDefaults() {
 	if cfg.ScriptsDir == "" {
 		cfg.ScriptsDir = defaults.ScriptsDir
 	}
+	if cfg.HotmailPool == "" && cfg.OutputDir != "" {
+		cfg.HotmailPool = filepath.Join(cfg.OutputDir, "hotmail-pool.json")
+	}
+	if cfg.HotmailPreflightWorkers <= 0 {
+		cfg.HotmailPreflightWorkers = defaults.HotmailPreflightWorkers
+	}
+	if cfg.HotmailPreflightWorkers > 32 {
+		cfg.HotmailPreflightWorkers = 32
+	}
+	defaultDirectHosts := []string{
+		"localhost",
+		"127.0.0.1",
+		"::1",
+		"web.open-traffic.com",
+		"account.minimax.io",
+	}
+	if len(cfg.ProxyDirectHosts) == 0 {
+		cfg.ProxyDirectHosts = defaultDirectHosts
+	} else {
+		seen := map[string]bool{}
+		for _, host := range append([]string{}, defaultDirectHosts...) {
+			seen[strings.ToLower(strings.TrimSpace(host))] = true
+		}
+		for _, host := range cfg.ProxyDirectHosts {
+			clean := strings.ToLower(strings.TrimSpace(host))
+			if clean != "" {
+				seen[clean] = true
+			}
+		}
+		cfg.ProxyDirectHosts = []string{}
+		for host := range seen {
+			cfg.ProxyDirectHosts = append(cfg.ProxyDirectHosts, host)
+		}
+	}
 }
 
 func (cfg Config) Validate() error {
-	for name, value := range map[string]string{
+	required := map[string]string{
 		"面板地址":                       cfg.PanelBase,
 		"面板密钥":                       cfg.PanelKey,
-		"邮箱域名":                       cfg.MailDomain,
-		"IMAP 主机":                    cfg.ImapHost,
-		"IMAP 用户":                    cfg.ImapUser,
-		"IMAP 授权码":                   cfg.ImapPassword,
 		"脚本目录":                       cfg.ScriptsDir,
 		"MINIMAX_SIGNATURE_SALT":     os.Getenv("MINIMAX_SIGNATURE_SALT"),
 		"MINIMAX_YY_SUFFIX":          os.Getenv("MINIMAX_YY_SUFFIX"),
 		"MINIMAX_RECAPTCHA_SITE_KEY": os.Getenv("MINIMAX_RECAPTCHA_SITE_KEY"),
-	} {
+	}
+	if cfg.MailMode == "hotmail" {
+		required["Hotmail 账号池"] = cfg.HotmailPool
+	} else {
+		required["邮箱域名"] = cfg.MailDomain
+		required["IMAP 主机"] = cfg.ImapHost
+		required["IMAP 用户"] = cfg.ImapUser
+		required["IMAP 授权码"] = cfg.ImapPassword
+	}
+	for name, value := range required {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("%s不能为空", name)
 		}
@@ -141,8 +206,19 @@ func (cfg Config) Validate() error {
 	if cfg.Count < 1 || cfg.Count > 200 {
 		return errors.New("批量数量必须在 1 到 200 之间")
 	}
-	if cfg.ImapPort < 1 || cfg.ImapPort > 65535 {
-		return errors.New("IMAP 端口无效")
+	if cfg.MailMode != "hotmail" {
+		if cfg.ImapPort < 1 || cfg.ImapPort > 65535 {
+			return errors.New("IMAP 端口无效")
+		}
+	} else {
+		if _, err := os.Stat(filepath.Join(cfg.ScriptsDir, "hotmail-graph.mjs")); err != nil {
+			return fmt.Errorf("找不到 scripts/hotmail-graph.mjs：%w", err)
+		}
+		if strings.TrimSpace(cfg.HotmailRaw) == "" {
+			if _, err := os.Stat(cfg.HotmailPool); err != nil {
+				return errors.New("Hotmail 模式下请先导入 Graph 账号，或确保账号池文件已存在")
+			}
+		}
 	}
 	if _, err := os.Stat(filepath.Join(cfg.ScriptsDir, "minimax-fast-batch.mjs")); err != nil {
 		return fmt.Errorf("找不到 scripts/minimax-fast-batch.mjs：%w", err)

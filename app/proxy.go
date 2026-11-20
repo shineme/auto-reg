@@ -16,6 +16,20 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+var (
+	stickyProxyMu   sync.Mutex
+	stickyProxyUser string
+	stickyProxyAt   time.Time
+)
+
+var proxyDirectHosts = []string{
+	"localhost",
+	"127.0.0.1",
+	"::1",
+	"web.open-traffic.com",
+	"account.minimax.io",
+}
+
 type proxyBridge struct {
 	mu       sync.Mutex
 	server   *http.Server
@@ -80,8 +94,8 @@ func proxyEnv(localProxy string) []string {
 	}
 	env := append(direct,
 		"NODE_USE_ENV_PROXY=1",
-		"NO_PROXY=localhost,127.0.0.1,::1",
-		"no_proxy=localhost,127.0.0.1,::1",
+		"NO_PROXY="+strings.Join(proxyDirectHosts, ","),
+		"no_proxy="+strings.Join(proxyDirectHosts, ","),
 	)
 	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"} {
 		env = append(env, key+"="+localProxy)
@@ -105,7 +119,13 @@ func (bridge *proxyBridge) stopLocked() {
 func (bridge *proxyBridge) connectHandler(upstream string) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodConnect {
-			http.Error(writer, "only CONNECT is supported", http.StatusMethodNotAllowed)
+			if request.URL.Path == "/__rotate" {
+				rotateStickyProxyUser()
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{"ok":true,"rotated":true}`))
+				return
+			}
+			http.Error(writer, "only CONNECT or /__rotate is supported", http.StatusMethodNotAllowed)
 			return
 		}
 		target, err := dialUpstream(upstream, request.Host)
@@ -139,6 +159,32 @@ func (bridge *proxyBridge) connectHandler(upstream string) http.HandlerFunc {
 	}
 }
 
+func rotatingProxyUser(username string) string {
+	base := strings.TrimSpace(username)
+	if base == "" {
+		return base
+	}
+	lower := strings.ToLower(base)
+	if strings.Contains(lower, "-session-") || strings.Contains(lower, "_session-") || strings.Contains(lower, "-sessid-") {
+		return base
+	}
+	stickyProxyMu.Lock()
+	defer stickyProxyMu.Unlock()
+	if stickyProxyUser == "" {
+		suffix := fmt.Sprintf("%d%d", time.Now().UnixNano(), time.Now().Unix()%997)
+		stickyProxyUser = base + "-session-" + suffix
+		stickyProxyAt = time.Now()
+	}
+	return stickyProxyUser
+}
+
+func rotateStickyProxyUser() {
+	stickyProxyMu.Lock()
+	defer stickyProxyMu.Unlock()
+	stickyProxyUser = ""
+	stickyProxyAt = time.Time{}
+}
+
 func dialUpstream(upstream, target string) (net.Conn, error) {
 	parsed, err := url.Parse(upstream)
 	if err != nil {
@@ -148,7 +194,7 @@ func dialUpstream(upstream, target string) (net.Conn, error) {
 	case "http", "https":
 		return dialHTTPProxy(parsed, target)
 	case "socks5", "socks5h":
-		auth := &proxy.Auth{User: parsed.User.Username()}
+		auth := &proxy.Auth{User: rotatingProxyUser(parsed.User.Username())}
 		if proxyPassword, ok := parsed.User.Password(); ok {
 			auth.Password = proxyPassword
 		}
@@ -169,7 +215,7 @@ func dialHTTPProxy(parsed *url.URL, target string) (net.Conn, error) {
 	}
 	request := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", target, target)
 	if parsed.User != nil {
-		credentials := parsed.User.Username()
+		credentials := rotatingProxyUser(parsed.User.Username())
 		if proxyPassword, ok := parsed.User.Password(); ok {
 			credentials += ":" + proxyPassword
 		}

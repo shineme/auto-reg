@@ -1,0 +1,1264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MiniMax 纯 Go 协议注册器</title>
+  <style>
+    :root {
+      --stage: #141417;
+      --card: #09090b;
+      --card-2: #0e0e11;
+      --line: rgba(255, 255, 255, 0.07);
+      --line-2: rgba(255, 255, 255, 0.12);
+      --text: #f4f4f5;
+      --muted: #92929c;
+      --dim: #62626c;
+      --accent: #38bdf8;
+      --ok: #34d399;
+      --err: #f87171;
+      --violet: #a78bfa;
+      --warn: #fbbf24;
+      --r-lg: 20px;
+      --r-md: 14px;
+      --r-sm: 10px;
+      --hair: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      --shadow: 0 18px 40px -22px rgba(0, 0, 0, 0.9);
+      --mono: "JetBrains Mono", "Cascadia Mono", Consolas, "SF Mono", monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    html { color-scheme: dark; }
+    option { background: #0b0b0e; color: var(--text); }
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus {
+      -webkit-text-fill-color: var(--text);
+      -webkit-box-shadow: 0 0 0 1000px #0b0b0e inset;
+      caret-color: var(--text);
+      transition: background-color 9999s ease-in-out 0s;
+    }
+    body {
+      margin: 0;
+      font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--stage);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(1100px 520px at 18% -12%, rgba(56, 189, 248, 0.10), transparent 62%),
+        radial-gradient(900px 480px at 88% -6%, rgba(167, 139, 250, 0.08), transparent 60%);
+      z-index: 0;
+    }
+    ::-webkit-scrollbar { width: 9px; height: 9px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.10);
+      border-radius: 99px;
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); background-clip: padding-box; }
+
+    /* ---------- shell ---------- */
+    .stage {
+      position: relative;
+      z-index: 1;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 14px;
+      gap: 12px;
+    }
+
+    .topbar {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 16px;
+      background: linear-gradient(180deg, rgba(9, 9, 11, 0.92), rgba(9, 9, 11, 0.7));
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      box-shadow: var(--hair), var(--shadow);
+      backdrop-filter: blur(12px);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .mark {
+      width: 38px; height: 38px;
+      border-radius: 12px;
+      display: grid; place-items: center;
+      font-weight: 800; font-size: 17px; color: #04121a;
+      background: linear-gradient(140deg, #7dd3fc, #38bdf8 45%, #a78bfa);
+      box-shadow: 0 8px 22px -8px rgba(56, 189, 248, 0.75), var(--hair);
+      flex: 0 0 auto;
+    }
+    .brand h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: 0.2px; }
+    .brand p { margin: 1px 0 0; font-size: 11.5px; color: var(--dim); }
+    .topbar-spacer { flex: 1 1 auto; }
+    .topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 7px 14px 7px 11px;
+      border-radius: 99px;
+      border: 1px solid var(--line-2);
+      background: rgba(255, 255, 255, 0.03);
+      font-size: 12px; font-weight: 600;
+      white-space: nowrap;
+    }
+    .status-pill .dot {
+      width: 8px; height: 8px; border-radius: 99px; background: var(--dim);
+      box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5);
+    }
+    .status-pill.is-running { border-color: rgba(52, 211, 153, 0.35); color: #d3fbe8; }
+    .status-pill.is-running .dot {
+      background: var(--ok);
+      animation: breathe 1.6s ease-out infinite;
+    }
+    .status-pill.is-error { border-color: rgba(248, 113, 113, 0.4); color: #ffd7d7; }
+    .status-pill.is-error .dot { background: var(--err); }
+    @keyframes breathe {
+      0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55); }
+      70% { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+    }
+
+    .layout {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 400px minmax(0, 1fr);
+      gap: 12px;
+    }
+    .col-config {
+      min-height: 0;
+      overflow-y: auto;
+      padding-right: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .col-run {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(140px, 1fr) minmax(200px, 1.05fr);
+      gap: 12px;
+    }
+
+    /* ---------- cards ---------- */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      box-shadow: var(--hair), var(--shadow);
+      padding: 14px 15px;
+    }
+    .card-head {
+      display: flex; align-items: center; gap: 9px;
+      margin-bottom: 12px;
+    }
+    .card-head .accent-bar {
+      width: 3px; height: 15px; border-radius: 99px; background: var(--accent);
+      box-shadow: 0 0 12px -1px var(--accent);
+    }
+    .card-head h2 { margin: 0; font-size: 13px; font-weight: 650; letter-spacing: 0.2px; }
+    .card-head .sub { color: var(--dim); font-size: 11px; }
+    .card-head .spacer { flex: 1; }
+    .sec-panel .accent-bar { background: var(--accent); }
+    .sec-task .accent-bar { background: var(--violet); }
+    .sec-mail .accent-bar { background: var(--ok); }
+    .sec-proxy .accent-bar { background: var(--warn); }
+    .sec-adv .accent-bar { background: var(--dim); }
+
+    /* ---------- form ---------- */
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 10px; }
+    .field { display: block; min-width: 0; }
+    .field > .lab {
+      display: flex; align-items: baseline; gap: 6px;
+      color: var(--muted); font-size: 11px; margin-bottom: 4px;
+    }
+    .field > .lab em { font-style: normal; color: var(--dim); font-size: 10px; }
+    input:not([type="checkbox"]):not([type="file"]), select, textarea {
+      width: 100%;
+      background: #0b0b0e;
+      border: 1px solid var(--line-2);
+      color: var(--text);
+      border-radius: var(--r-sm);
+      padding: 7px 10px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-size: 11px; line-height: 1.5; }
+    input:focus, select:focus, textarea:focus {
+      border-color: rgba(56, 189, 248, 0.55);
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.12);
+      background: #0d0d11;
+    }
+    input::placeholder, textarea::placeholder { color: #45454e; }
+    select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 15px) 12px, calc(100% - 10px) 12px; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 26px; }
+
+    .switch {
+      display: flex; align-items: center; gap: 9px;
+      padding: 7px 0;
+      cursor: pointer; user-select: none;
+    }
+    .switch input { display: none; }
+    .switch .track {
+      position: relative; flex: 0 0 auto;
+      width: 34px; height: 19px; border-radius: 99px;
+      background: #1c1c22; border: 1px solid var(--line-2);
+      transition: background .18s ease, border-color .18s ease;
+    }
+    .switch .track::after {
+      content: ""; position: absolute; top: 2px; left: 2px;
+      width: 13px; height: 13px; border-radius: 99px;
+      background: #6d6d78;
+      transition: transform .18s cubic-bezier(.2, .8, .2, 1), background .18s ease;
+    }
+    .switch input:checked + .track { background: rgba(56, 189, 248, 0.28); border-color: rgba(56, 189, 248, 0.55); }
+    .switch input:checked + .track::after { transform: translateX(15px); background: var(--accent); box-shadow: 0 0 10px -2px var(--accent); }
+    .switch .txt { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
+    .switch input:checked ~ .txt { color: var(--text); }
+
+    .row-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .btn {
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-sm);
+      padding: 7px 13px;
+      cursor: pointer;
+      font-size: 12px; font-weight: 600;
+      background: rgba(255, 255, 255, 0.045);
+      color: var(--text);
+      font-family: inherit;
+      transition: transform .12s ease, filter .15s ease, border-color .15s ease, background .15s ease;
+      white-space: nowrap;
+    }
+    .btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-color: rgba(255, 255, 255, 0.2); }
+    .btn:active:not(:disabled) { transform: translateY(1px); }
+    .btn:disabled { opacity: .38; cursor: not-allowed; }
+    .btn-primary { background: linear-gradient(180deg, #38bdf8, #0ea5e9); color: #04121a; border-color: transparent; box-shadow: 0 8px 20px -10px rgba(56, 189, 248, .9); }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.08); background: linear-gradient(180deg, #38bdf8, #0ea5e9); }
+    .btn-ok { background: rgba(52, 211, 153, .14); color: #a7f3d0; border-color: rgba(52, 211, 153, .38); }
+    .btn-ok:hover:not(:disabled) { background: rgba(52, 211, 153, .22); }
+    .btn-danger { background: rgba(248, 113, 113, .13); color: #fecaca; border-color: rgba(248, 113, 113, .35); }
+    .btn-danger:hover:not(:disabled) { background: rgba(248, 113, 113, .2); }
+    .btn-ghost { background: transparent; color: var(--muted); }
+    .btn-ghost:hover:not(:disabled) { color: var(--text); }
+    .btn-sm { padding: 5px 10px; font-size: 11px; }
+
+    .hint { color: var(--dim); font-size: 11px; line-height: 1.5; }
+    .hint strong { color: var(--muted); font-weight: 600; }
+    .mono { font-family: var(--mono); }
+    .pill-status {
+      display: inline-block; padding: 2px 9px; border-radius: 99px;
+      border: 1px solid var(--line-2); font-size: 11px; color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    /* ---------- hero stats ---------- */
+    .hero {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      box-shadow: var(--hair), var(--shadow);
+      padding: 14px 16px;
+    }
+    .hero-top { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+    .hero-num {
+      font-family: var(--mono);
+      font-size: 34px; font-weight: 700; line-height: 1;
+      letter-spacing: -1px;
+      background: linear-gradient(180deg, #ffffff, #9dd9f5);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .hero-cap { color: var(--muted); font-size: 11.5px; margin-top: 5px; }
+    .stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-left: auto; width: min(560px, 100%); }
+    .stat {
+      background: var(--card-2);
+      border: 1px solid var(--line);
+      border-radius: var(--r-md);
+      box-shadow: var(--hair);
+      padding: 9px 11px;
+      min-width: 0;
+    }
+    .stat .k { color: var(--dim); font-size: 10.5px; letter-spacing: .3px; text-transform: uppercase; }
+    .stat .v { font-family: var(--mono); font-size: 19px; font-weight: 700; margin-top: 3px; }
+    .stat .v.ok { color: var(--ok); }
+    .stat .v.err { color: var(--err); }
+    .stat .v.violet { color: var(--violet); }
+    .stat .v.warn { color: var(--warn); }
+
+    .progress {
+      margin-top: 12px;
+      height: 8px;
+      border-radius: 99px;
+      background: #17171c;
+      overflow: hidden;
+      position: relative;
+    }
+    .progress > i {
+      display: block; height: 100%; width: 0%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, #38bdf8, #a78bfa);
+      box-shadow: 0 0 16px -2px rgba(56, 189, 248, .8);
+      transition: width .45s cubic-bezier(.2, .8, .2, 1);
+      position: relative; overflow: hidden;
+    }
+    .progress > i::after {
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .35), transparent);
+      animation: shimmer 2.2s linear infinite;
+    }
+    @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+    .hero-foot {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      margin-top: 9px; color: var(--dim); font-size: 11.5px;
+    }
+    .hero-foot .stage-text { color: var(--violet); font-weight: 600; }
+    .hero-foot .mail-text { font-family: var(--mono); color: var(--muted); }
+
+    /* ---------- console ---------- */
+    .console {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      box-shadow: var(--hair), var(--shadow);
+      display: flex; flex-direction: column;
+      min-height: 0; overflow: hidden;
+    }
+    .console-head {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      flex: 0 0 auto;
+    }
+    .console-head h3 { margin: 0; font-size: 12.5px; font-weight: 650; }
+    .console-head .spacer { flex: 1; }
+    .chips { display: flex; gap: 4px; background: #101014; border: 1px solid var(--line); border-radius: 99px; padding: 3px; }
+    .chip {
+      border: none; background: transparent; color: var(--muted);
+      font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 99px;
+      cursor: pointer; font-family: inherit;
+    }
+    .chip.active { background: rgba(56, 189, 248, .16); color: #bae6fd; }
+    .console-body {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto;
+      padding: 8px 12px 12px;
+      font-family: var(--mono);
+      font-size: 11.5px; line-height: 1.65;
+    }
+    .log-line { display: flex; gap: 8px; padding: 1px 0; word-break: break-word; }
+    .log-line .t { color: #4d4d57; flex: 0 0 auto; }
+    .log-line .lv { flex: 0 0 auto; color: var(--dim); }
+    .log-line .msg { flex: 1 1 auto; color: #c7c7d0; white-space: pre-wrap; }
+    .log-line.error .msg { color: var(--err); }
+    .log-line.error .lv { color: var(--err); }
+    .log-line.warn .msg { color: var(--warn); }
+    .log-line.warn .lv { color: var(--warn); }
+    .log-line.ok .msg { color: var(--ok); }
+    .log-line.ok .lv { color: var(--ok); }
+    .log-line.state .msg { color: var(--violet); }
+    .log-empty { color: var(--dim); padding: 10px 0; }
+
+    /* ---------- tabs ---------- */
+    .panel-tabs {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      box-shadow: var(--hair), var(--shadow);
+      display: flex; flex-direction: column;
+      min-height: 0; overflow: hidden;
+    }
+    .tabbar {
+      display: flex; align-items: center; gap: 4px;
+      padding: 8px 10px; border-bottom: 1px solid var(--line);
+      flex: 0 0 auto;
+    }
+    .tab {
+      border: none; background: transparent; color: var(--muted);
+      font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 99px;
+      cursor: pointer; font-family: inherit;
+    }
+    .tab.active { background: rgba(255, 255, 255, .07); color: var(--text); }
+    .tab .cnt { color: var(--dim); font-family: var(--mono); font-size: 11px; margin-left: 4px; }
+    .tabbar .spacer { flex: 1; }
+    .tabpanes { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+    .tabpane { display: none; height: 100%; overflow: auto; padding: 10px 12px; }
+    .tabpane.active { display: block; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    thead th {
+      position: sticky; top: 0; z-index: 1;
+      background: var(--card);
+      text-align: left; padding: 6px 8px; color: var(--dim);
+      font-weight: 600; font-size: 11px; letter-spacing: .3px;
+      border-bottom: 1px solid var(--line);
+    }
+    tbody td { padding: 7px 8px; border-bottom: 1px solid rgba(255, 255, 255, .04); }
+    tbody tr:hover td { background: rgba(255, 255, 255, .025); }
+    td.mono, th.mono { font-family: var(--mono); }
+    .badge-ok { color: var(--ok); font-weight: 600; }
+    .badge-err { color: var(--err); }
+
+    .mail-row {
+      display: flex; justify-content: space-between; gap: 10px;
+      padding: 8px 9px; border-radius: var(--r-sm);
+      border: 1px solid transparent; cursor: pointer;
+    }
+    .mail-row:hover { background: rgba(255, 255, 255, .04); border-color: var(--line); }
+    .mail-row .subj { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mail-row .meta { color: var(--dim); font-size: 11px; margin-top: 2px; }
+    .mail-row .when { color: var(--dim); font-size: 11px; white-space: nowrap; font-family: var(--mono); }
+    .mail-body {
+      margin-top: 10px; padding: 12px;
+      background: var(--card-2); border: 1px solid var(--line);
+      border-radius: var(--r-md); font-size: 12px; line-height: 1.6;
+      max-height: 320px; overflow: auto;
+    }
+    .mail-body .mail-head { color: var(--muted); font-size: 11px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+    .mail-body .mail-subject { color: var(--accent); font-weight: 650; font-size: 13px; margin-bottom: 4px; }
+
+    /* ---------- banner / toast ---------- */
+    .banner {
+      display: none;
+      align-items: center; gap: 10px;
+      padding: 9px 14px;
+      border-radius: var(--r-md);
+      background: rgba(248, 113, 113, .1);
+      border: 1px solid rgba(248, 113, 113, .35);
+      color: #fecaca; font-size: 12px;
+    }
+    .banner.show { display: flex; }
+    .banner .spacer { flex: 1; }
+    .toasts { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 50; }
+    .toast {
+      padding: 9px 14px; border-radius: var(--r-md);
+      background: rgba(9, 9, 11, .95); border: 1px solid var(--line-2);
+      box-shadow: var(--shadow); font-size: 12px;
+      animation: slidein .25s cubic-bezier(.2, .8, .2, 1);
+      max-width: 380px;
+    }
+    .toast.ok { border-color: rgba(52, 211, 153, .45); color: #d3fbe8; }
+    .toast.err { border-color: rgba(248, 113, 113, .45); color: #ffd7d7; }
+    @keyframes slidein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .hidden { display: none !important; }
+    .divider { height: 1px; background: var(--line); margin: 12px 0; }
+    .file-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input[type="file"] { font-size: 11px; color: var(--muted); width: auto; max-width: 260px; }
+    input[type="file"]::file-selector-button {
+      background: rgba(255, 255, 255, .05); color: var(--text);
+      border: 1px solid var(--line-2); border-radius: 8px;
+      padding: 5px 10px; margin-right: 8px; cursor: pointer; font-family: inherit; font-size: 11px;
+    }
+    @media (max-width: 1180px) {
+      .layout { grid-template-columns: 340px minmax(0, 1fr); }
+      .stat-grid { width: 100%; margin-left: 0; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="stage">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark">M</div>
+        <div>
+          <h1>MiniMax 协议注册工作台</h1>
+          <p>纯 Go 协议实现 · 零 Node.js · 面板账号自动绑定</p>
+        </div>
+      </div>
+      <div class="topbar-spacer"></div>
+      <div class="topbar-actions">
+        <div class="status-pill" id="statusPill"><span class="dot"></span><span id="statusText">待机</span></div>
+        <button class="btn btn-ghost btn-sm" id="btnSave">保存配置</button>
+        <button class="btn btn-ok" id="btnSupStart">开始监督批量</button>
+        <button class="btn btn-danger" id="btnSupStop">停止监督</button>
+      </div>
+    </header>
+
+    <div class="banner" id="banner">
+      <span id="bannerText"></span>
+      <span class="spacer"></span>
+      <button class="btn btn-sm" id="bannerRetry">重试加载</button>
+      <button class="btn btn-sm btn-ghost" id="bannerClose">忽略</button>
+    </div>
+
+    <div class="layout">
+      <!-- ============ 左：配置 ============ -->
+      <aside class="col-config">
+
+        <!-- 面板 -->
+        <section class="card sec-panel">
+          <div class="card-head">
+            <span class="accent-bar"></span><h2>面板绑定</h2>
+            <span class="spacer"></span><span class="sub">多线程可分摊到两个面板</span>
+          </div>
+          <div class="grid2">
+            <label class="field"><span class="lab">面板地址</span><input id="panelBase" spellcheck="false" /></label>
+            <label class="field"><span class="lab">面板密码 / Key</span><input id="panelKey" type="password" /></label>
+            <label class="field"><span class="lab">面板 2 地址 <em>可选</em></span><input id="panel2Base" placeholder="留空则只用主面板" spellcheck="false" /></label>
+            <label class="field"><span class="lab">面板 2 密码 / Key</span><input id="panel2Key" type="password" /></label>
+          </div>
+          <div class="row-btns">
+            <button class="btn btn-sm" id="btnTestPanel">测试面板连接</button>
+          </div>
+        </section>
+
+        <!-- 任务 -->
+        <section class="card sec-task">
+          <div class="card-head">
+            <span class="accent-bar"></span><h2>注册任务</h2>
+            <span class="spacer"></span><span class="sub" id="taskHint">目标 —</span>
+          </div>
+          <div class="grid2">
+            <label class="field">
+              <span class="lab">接码模式</span>
+              <select id="mailMode">
+                <option value="hotmail">Hotmail Graph 号池</option>
+                <option value="imap">域名邮箱 + IMAP</option>
+              </select>
+            </label>
+            <label class="field"><span class="lab">目标成功数量</span><input id="count" type="number" min="1" max="5000" /></label>
+            <label class="field"><span class="lab">并行线路数 <em>1-16</em></span><input id="workers" type="number" min="1" max="16" /></label>
+            <label class="field"><span class="lab">签到时区 <em>timezone_id</em></span><input id="timezoneId" placeholder="Asia/Shanghai" spellcheck="false" /></label>
+          </div>
+          <div class="divider"></div>
+          <label class="switch"><input type="checkbox" id="captchaDirect" /><span class="track"></span><span class="txt">验证码页面直连<br /><em style="color:var(--dim);font-style:normal">代理不稳时勾选</em></span></label>
+          <label class="switch"><input type="checkbox" id="mailViaProxy" /><span class="track"></span><span class="txt">邮箱取码走代理<br /><em style="color:var(--dim);font-style:normal">默认直连，代理失效时别勾</em></span></label>
+          <label class="switch"><input type="checkbox" id="signinAfterRegister" /><span class="track"></span><span class="txt">注册后自动签到领积分<br /><em style="color:var(--dim);font-style:normal">MiniMax Code 每日签到</em></span></label>
+          <div class="row-btns">
+            <button class="btn btn-primary" id="btnStart">开始纯 Go 注册</button>
+            <button class="btn btn-danger" id="btnStop" disabled>停止任务</button>
+          </div>
+        </section>
+
+        <!-- 收件 -->
+        <section class="card sec-mail">
+          <div class="card-head">
+            <span class="accent-bar"></span><h2>邮箱与收件</h2>
+            <span class="spacer"></span><span class="sub" id="poolStatus">号池：未加载</span>
+          </div>
+
+          <div id="hotmailBox">
+            <label class="field">
+              <span class="lab">Hotmail Graph 文本 <em>email----pass----clientId----refreshToken</em></span>
+              <textarea id="hotmailRaw" placeholder="粘贴 Hotmail 账号行后点击“导入号池”"></textarea>
+            </label>
+            <div class="hint" id="rawCount" style="margin-top:5px;">已粘贴 0 行 / 0 字符</div>
+            <div class="file-row" style="margin-top:8px;">
+              <input type="file" id="rawFile" accept=".txt" />
+              <button class="btn btn-sm" id="btnImportFile">选择文件并导入</button>
+            </div>
+            <div class="divider"></div>
+            <div class="grid2">
+              <label class="field"><span class="lab">号池文件路径</span><input id="hotmailPool" spellcheck="false" /></label>
+              <label class="field"><span class="lab">测活并发线程</span><input id="hotmailPreflightWorkers" type="number" min="1" max="32" /></label>
+            </div>
+            <div class="row-btns">
+              <button class="btn btn-sm" id="btnImport">导入号池</button>
+              <button class="btn btn-sm" id="btnPreflight">多线程测活</button>
+              <button class="btn btn-sm btn-danger" id="btnRemoveSkipped">一键移除失效</button>
+            </div>
+          </div>
+
+          <div id="imapBox" class="hidden">
+            <div class="grid2">
+              <label class="field"><span class="lab">邮箱域名</span><input id="mailDomain" spellcheck="false" /></label>
+              <label class="field"><span class="lab">邮箱前缀</span><input id="mailPrefix" spellcheck="false" /></label>
+              <label class="field"><span class="lab">IMAP 主机</span><input id="imapHost" spellcheck="false" /></label>
+              <label class="field"><span class="lab">IMAP 端口</span><input id="imapPort" type="number" /></label>
+              <label class="field"><span class="lab">IMAP 账号</span><input id="imapUser" spellcheck="false" /></label>
+              <label class="field"><span class="lab">IMAP 授权码</span><input id="imapPassword" type="password" /></label>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+          <div class="row-btns">
+            <button class="btn btn-sm" id="btnCheckinAll">批量补签</button>
+            <button class="btn btn-sm" id="btnMailScan">批量收信</button>
+          </div>
+        </section>
+
+        <!-- 代理 -->
+        <section class="card sec-proxy">
+          <div class="card-head">
+            <span class="accent-bar"></span><h2>代理与节点池</h2>
+            <span class="spacer"></span><span class="sub" id="poolStats">节点池：未加载</span>
+          </div>
+          <label class="field"><span class="lab">代理地址 <em>socks5:// / http:// / 紧凑格式</em></span><input id="proxyUrl" placeholder="留空直连" spellcheck="false" /></label>
+          <div class="grid2" style="margin-top:9px;">
+            <label class="field">
+              <span class="lab">代理商家类型</span>
+              <select id="proxyStyle">
+                <option value="auto">自动识别（cliproxy / 711）</option>
+                <option value="711">711（session- + sessTime-）</option>
+                <option value="clipproxy">Cliproxy（sid- + t- + st-）</option>
+              </select>
+            </label>
+            <label class="field"><span class="lab">Cliproxy 州省 <em>可选</em></span><input id="proxyState" placeholder="留空=不限" spellcheck="false" /></label>
+            <label class="field"><span class="lab">代理区域轮换 <em>711，逗号分隔</em></span><input id="proxyRegionRotate" placeholder="如 JP,US,GB" spellcheck="false" /></label>
+            <label class="field"><span class="lab">Sticky 时长 <em>分钟 5-180</em></span><input id="proxySessTime" type="number" min="0" max="180" placeholder="0=默认" /></label>
+          </div>
+          <label class="switch"><input type="checkbox" id="proxySticky" /><span class="track"></span><span class="txt">启用 Sticky 会话 <em style="color:var(--dim);font-style:normal">关闭=每请求换 IP</em></span></label>
+          <div class="divider"></div>
+          <label class="field"><span class="lab">订阅地址 <em>Clash YAML / base64 链接列表</em></span><input id="proxySubscriptionUrl" placeholder="https://.../sub?token=..." spellcheck="false" /></label>
+          <div class="grid2" style="margin-top:9px;">
+            <label class="field"><span class="lab">节点池文件路径</span><input id="proxyPoolFile" placeholder="留空=输出目录/proxy-pool.json" spellcheck="false" /></label>
+            <label class="field"><span class="lab">测活并发线程</span><input id="proxyPoolWorkers" type="number" min="1" max="64" /></label>
+            <label class="field"><span class="lab">本地代理端口池 <em>18001-18422</em></span><input id="proxyLocalPorts" placeholder="如 18001-18422" spellcheck="false" /></label>
+            <div></div>
+          </div>
+          <label class="switch"><input type="checkbox" id="proxyPoolUse" /><span class="track"></span><span class="txt">使用节点池 <em style="color:var(--dim);font-style:normal">每次尝试轮换出口 IP</em></span></label>
+          <div class="row-btns">
+            <button class="btn btn-sm" id="btnFetchSub">拉取订阅</button>
+            <button class="btn btn-sm" id="btnCheckPool">节点测活</button>
+            <button class="btn btn-sm btn-ghost" id="btnPoolStats">刷新状态</button>
+          </div>
+        </section>
+
+        <!-- 高级 -->
+        <section class="card sec-adv">
+          <div class="card-head">
+            <span class="accent-bar"></span><h2>高级</h2>
+            <span class="spacer"></span><span class="sub">一般无需改动</span>
+          </div>
+          <label class="field"><span class="lab">固定密码 <em>留空=随机强密码；填写则全部账号共用（排查 1200058）</em></span><input id="fixedPassword" type="text" placeholder="如 DD890528@?" spellcheck="false" /></label>
+          <div class="grid2" style="margin-top:9px;">
+            <label class="field">
+              <span class="lab">票据模式</span>
+              <select id="ticketMode">
+                <option value="cdp">纯 Go CDP 取票（无 Node）</option>
+                <option value="external">外部票据接口（无浏览器）</option>
+              </select>
+            </label>
+            <label class="field"><span class="lab">外部票据接口 URL</span><input id="externalTicketUrl" placeholder="http://127.0.0.1:9000/ticket" spellcheck="false" /></label>
+            <label class="field"><span class="lab">SIGNATURE_SALT</span><input id="signatureSalt" type="password" /></label>
+            <label class="field"><span class="lab">YY_SUFFIX</span><input id="yySuffix" type="password" /></label>
+            <label class="field"><span class="lab">RECAPTCHA_SITE_KEY</span><input id="recaptchaSiteKey" spellcheck="false" /></label>
+            <label class="field"><span class="lab">Chrome 路径</span><input id="chromePath" spellcheck="false" /></label>
+          </div>
+          <label class="field" style="margin-top:9px;"><span class="lab">输出目录</span><input id="outputDir" spellcheck="false" /></label>
+          <div class="row-btns">
+            <button class="btn btn-sm btn-ghost" id="btnClear">清理历史记录</button>
+          </div>
+        </section>
+
+      </aside>
+
+      <!-- ============ 右：运行态 ============ -->
+      <section class="col-run">
+
+        <div class="hero">
+          <div class="hero-top">
+            <div>
+              <div class="hero-num" id="heroNum">0</div>
+              <div class="hero-cap">已成功注册账号（目标 <span id="heroTarget">0</span>）</div>
+            </div>
+            <div class="stat-grid">
+              <div class="stat"><div class="k">成功率</div><div class="v ok" id="stRate">—</div></div>
+              <div class="stat"><div class="k">失败尝试</div><div class="v err" id="stFail">0</div></div>
+              <div class="stat"><div class="k">并行线路</div><div class="v violet" id="stWorkers">0</div></div>
+              <div class="stat"><div class="k">状态</div><div class="v" id="stRun" style="font-size:14px;">待机</div></div>
+            </div>
+          </div>
+          <div class="progress"><i id="stBar"></i></div>
+          <div class="hero-foot">
+            <span>阶段：<span class="stage-text" id="stStage">未开始</span></span>
+            <span>·</span>
+            <span class="mail-text" id="stEmail">-</span>
+            <span class="spacer" style="flex:1"></span>
+            <span id="stUpdated"></span>
+          </div>
+        </div>
+
+        <div class="console">
+          <div class="console-head">
+            <h3>运行日志</h3>
+            <div class="chips">
+              <button class="chip active" data-filter="all">全部</button>
+              <button class="chip" data-filter="error">错误</button>
+              <button class="chip" data-filter="warn">警告</button>
+              <button class="chip" data-filter="ok">成功</button>
+            </div>
+            <span class="spacer"></span>
+            <span class="hint" id="logCount">0 条</span>
+            <button class="btn btn-sm btn-ghost" id="btnLogClear">清空</button>
+          </div>
+          <div class="console-body" id="logs"></div>
+        </div>
+
+        <div class="panel-tabs">
+          <div class="tabbar">
+            <button class="tab active" data-tab="accounts">已绑定账号 <span class="cnt" id="tabAccCount">0</span></button>
+            <button class="tab" data-tab="mail">收件箱浏览</button>
+            <span class="spacer"></span>
+            <button class="btn btn-sm btn-ghost" id="btnExport">导出 CSV</button>
+          </div>
+          <div class="tabpanes">
+            <div class="tabpane active" id="pane-accounts">
+              <table>
+                <thead>
+                  <tr><th style="width:44px">#</th><th>邮箱</th><th style="width:150px">面板账号</th><th style="width:190px">设备码 / user_code</th><th style="width:90px">时间</th></tr>
+                </thead>
+                <tbody id="resultsBody"></tbody>
+              </table>
+              <div class="hint" id="accEmpty" style="padding:16px;text-align:center;">暂无已绑定账号</div>
+            </div>
+            <div class="tabpane" id="pane-mail">
+              <div class="grid2" style="grid-template-columns: 1fr auto; align-items:end;">
+                <label class="field"><span class="lab">选择号池邮箱</span><input id="mailInboxEmail" list="mailEmailList" placeholder="输入或选择一个邮箱" spellcheck="false" /></label>
+                <button class="btn btn-sm btn-primary" id="btnMailOpen">打开收件箱</button>
+              </div>
+              <datalist id="mailEmailList"></datalist>
+              <div class="hint" id="mailInboxNote" style="margin-top:6px;"></div>
+              <div id="mailInboxList" style="margin-top:8px;"></div>
+              <div id="mailMsgBody"></div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const fields = [
+      "panelBase", "panelKey", "panel2Base", "panel2Key", "mailMode", "count", "workers", "captchaDirect", "mailViaProxy",
+      "signinAfterRegister", "timezoneId",
+      "mailDomain", "mailPrefix", "imapHost", "imapPort", "imapUser", "imapPassword",
+      "hotmailRaw", "hotmailPool", "hotmailPreflightWorkers",
+      "proxyUrl", "proxyRegionRotate", "proxySessTime", "proxyStyle", "proxyState", "proxySticky",
+      "proxySubscriptionUrl", "proxyPoolFile", "proxyPoolUse", "proxyPoolWorkers", "proxyLocalPorts",
+      "fixedPassword", "ticketMode", "externalTicketUrl",
+      "signatureSalt", "yySuffix", "recaptchaSiteKey", "chromePath", "outputDir"
+    ];
+
+    const LOG_LIMIT = 1500;
+    let logBuffer = [];
+    let logFilter = "all";
+    let lastSummary = { results: [] };
+
+    /* ---------------- 通用工具 ---------------- */
+    function esc(s) {
+      return String(s === undefined || s === null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+    function toast(msg, kind) {
+      const el = document.createElement("div");
+      el.className = "toast" + (kind ? " " + kind : "");
+      el.textContent = msg;
+      $("toasts").appendChild(el);
+      setTimeout(() => {
+        el.style.transition = "opacity .3s ease, transform .3s ease";
+        el.style.opacity = "0";
+        el.style.transform = "translateY(6px)";
+        setTimeout(() => el.remove(), 320);
+      }, 3200);
+    }
+    function showBanner(text) {
+      $("bannerText").textContent = text;
+      $("banner").classList.add("show");
+    }
+    function hideBanner() { $("banner").classList.remove("show"); }
+
+    /* ---------------- 日志 ---------------- */
+    function classify(level, msg) {
+      if (level === "error") return "error";
+      if (/\[state\]/.test(msg)) return "state";
+      if (/(失败|超时|拒绝|未通过|被拒|失效|异常|重试|跳过|冷却)/.test(msg)) return "warn";
+      if (/(成功|完成|已绑定|已注册|已保存|签到|领取|导入|测活完成)/.test(msg)) return "ok";
+      return "info";
+    }
+    function appendLog(level, message, time) {
+      let lv = String(level || "info").toLowerCase();
+      let msg = String(message === undefined || message === null ? "" : message);
+      // supervisor 会自带 "[15:04:05] [info] " 前缀，剥掉避免时间戳重复
+      const m = msg.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*\[(\w+)\]\s*(.*)$/);
+      if (m) {
+        time = time || m[1];
+        lv = m[2].toLowerCase();
+        msg = m[3];
+      }
+      const kind = classify(lv, msg);
+      logBuffer.push({ lv: kind, raw: lv, msg, time: time || new Date().toTimeString().slice(0, 8) });
+      if (logBuffer.length > LOG_LIMIT) logBuffer.splice(0, logBuffer.length - LOG_LIMIT);
+      renderLogs();
+    }
+    function renderLogs() {
+      const box = $("logs");
+      const show = logBuffer.filter((l) => {
+        if (logFilter === "all") return true;
+        if (logFilter === "warn") return l.lv === "warn";
+        if (logFilter === "ok") return l.lv === "ok";
+        if (logFilter === "error") return l.lv === "error";
+        return true;
+      });
+      $("logCount").textContent = show.length + " 条";
+      if (show.length === 0) {
+        box.innerHTML = '<div class="log-empty">暂无日志。启动任务后这里会实时输出进度。</div>';
+        return;
+      }
+      const html = show.slice(-600).map((l) =>
+        '<div class="log-line ' + l.lv + '"><span class="t">[' + esc(l.time) + ']</span>' +
+        '<span class="lv">[' + esc(l.raw) + ']</span>' +
+        '<span class="msg">' + esc(l.msg) + '</span></div>'
+      ).join("");
+      box.innerHTML = html;
+      box.scrollTop = box.scrollHeight;
+    }
+    document.querySelectorAll(".chip").forEach((c) => {
+      c.addEventListener("click", () => {
+        document.querySelectorAll(".chip").forEach((x) => x.classList.remove("active"));
+        c.classList.add("active");
+        logFilter = c.dataset.filter;
+        renderLogs();
+      });
+    });
+    $("btnLogClear").addEventListener("click", () => {
+      logBuffer = [];
+      renderLogs();
+    });
+
+    /* ---------------- 配置读写 ---------------- */
+    function readForm() {
+      const cfg = {};
+      for (const f of fields) {
+        const el = $(f);
+        if (!el) continue;
+        if (el.type === "checkbox") cfg[f] = el.checked;
+        else cfg[f] = el.type === "number" ? Number(el.value || 0) : el.value;
+      }
+      return cfg;
+    }
+    function writeForm(cfg) {
+      if (!cfg || typeof cfg !== "object") return;
+      for (const f of fields) {
+        const el = $(f);
+        if (!el || cfg[f] === undefined || cfg[f] === null) continue;
+        if (el.type === "checkbox") el.checked = Boolean(cfg[f]);
+        else el.value = cfg[f];
+      }
+      toggleMailMode();
+      updateTaskHint();
+    }
+    function toggleMailMode() {
+      const isHotmail = $("mailMode").value === "hotmail";
+      $("hotmailBox").classList.toggle("hidden", !isHotmail);
+      $("imapBox").classList.toggle("hidden", isHotmail);
+    }
+    function updateTaskHint() {
+      const c = Number($("count").value || 0);
+      const w = Number($("workers").value || 0);
+      $("taskHint").textContent = "目标 " + c + " · 线路 " + w;
+    }
+    ["count", "workers"].forEach((id) => $(id).addEventListener("input", updateTaskHint));
+
+    /* ---------------- 号池 / 节点池 ---------------- */
+    function renderMailPoolStats(st) {
+      if (!st) return;
+      $("poolStatus").textContent =
+        "号池 总 " + st.total + " · 可用 " + st.available + " · 已用 " + st.used +
+        " · 失效 " + st.skipped + " · 处理中 " + st.reserved;
+    }
+    function renderNodePoolStats(st) {
+      if (!st) return;
+      $("poolStats").textContent =
+        "节点池 共 " + st.total + " · 存活 " + st.alive + " · 失效 " + st.dead +
+        (st.checked ? " · 本次测活 " + st.checked : "");
+    }
+
+    /* ---------------- 进度 / 统计 ---------------- */
+    function renderSummary(s) {
+      if (!s || typeof s !== "object") return;
+      lastSummary = s;
+      const ok = Number(s.succeeded || 0);
+      const target = Number(s.target || 0);
+      const fail = Number(s.failedAttempts || 0);
+      const pct = target > 0 ? Math.min(100, (ok / target) * 100) : 0;
+
+      $("heroNum").textContent = ok.toLocaleString();
+      $("heroTarget").textContent = target.toLocaleString();
+      $("stFail").textContent = fail.toLocaleString();
+      $("stBar").style.width = pct.toFixed(2) + "%";
+      $("stRate").textContent = (ok + fail) > 0 ? ((ok / (ok + fail)) * 100).toFixed(1) + "%" : "—";
+      $("stWorkers").textContent = Number(readForm().workers || 0);
+      $("stStage").textContent = s.currentStage || "待机";
+      $("stEmail").textContent = s.currentEmail || "-";
+      if (s.updatedAt) $("stUpdated").textContent = "更新于 " + String(s.updatedAt).slice(11, 19);
+
+      const running = !!s.running;
+      $("stRun").textContent = running ? "运行中" : "已停止";
+      $("stRun").className = "v " + (running ? "ok" : "");
+      const pill = $("statusPill");
+      pill.classList.toggle("is-running", running);
+      pill.classList.toggle("is-error", !running && fail > 0 && ok === 0);
+      $("statusText").textContent = running ? "运行中" : (ok > 0 ? "已完成 " + ok : "待机");
+
+      $("btnStart").disabled = running;
+      $("btnStop").disabled = !running;
+
+      const tbody = $("resultsBody");
+      tbody.innerHTML = "";
+      const list = Array.isArray(s.results) ? s.results : [];
+      $("tabAccCount").textContent = list.length;
+      $("accEmpty").classList.toggle("hidden", list.length > 0);
+      for (let i = list.length - 1; i >= 0; i--) {
+        const r = list[i];
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td class='mono'>" + (list.length - i) + "</td>" +
+          "<td>" + esc(r.email) + "</td>" +
+          "<td class='badge-ok mono'>" + esc(r.providerName || "") + "</td>" +
+          "<td class='mono' style='color:var(--muted)'>" + esc(r.userCode || r.signInId || "") + "</td>" +
+          "<td class='mono' style='color:var(--dim)'>" + esc(String(r.createdAt || "").slice(11, 19)) + "</td>";
+        tbody.appendChild(tr);
+      }
+    }
+
+    /* ---------------- 收件箱 ---------------- */
+    async function loadMailEmails() {
+      try {
+        const emails = await window.go.main.App.MailListOptions(readForm());
+        const dl = $("mailEmailList");
+        dl.innerHTML = "";
+        for (const e of (emails || [])) {
+          const opt = document.createElement("option");
+          opt.value = e;
+          dl.appendChild(opt);
+        }
+      } catch (err) { /* 静默 */ }
+    }
+    function renderMailInbox(view) {
+      const box = $("mailInboxList");
+      box.innerHTML = "";
+      const items = (view && view.items) || [];
+      if (view && view.error) {
+        box.innerHTML = '<div class="log-line error"><span class="msg">' + esc(view.error) + "</span></div>";
+      }
+      if (items.length === 0 && !(view && view.error)) {
+        box.innerHTML = '<div class="hint" style="padding:12px;text-align:center;">收件箱与垃圾箱都没有邮件</div>';
+        return;
+      }
+      for (const it of items) {
+        const row = document.createElement("div");
+        row.className = "mail-row";
+        const tag = it.folder === "junkemail" ? "垃圾箱" : "收件箱";
+        row.innerHTML =
+          "<div style='min-width:0'><div class='subj'>" + esc(it.subject || "(无主题)") + "</div>" +
+          "<div class='meta'>" + esc(it.from) + " · " + tag + (it.isRead ? "" : " · 未读") + "</div></div>" +
+          "<div class='when'>" + esc(String(it.receivedAt || "").slice(5, 16)) + "</div>";
+        row.addEventListener("click", () => openMailMessage(it));
+        box.appendChild(row);
+      }
+    }
+    async function openMailMessage(it) {
+      const email = $("mailInboxEmail").value;
+      const bodyBox = $("mailMsgBody");
+      bodyBox.innerHTML = '<div class="mail-body hint">正在加载正文 ' + esc(it.id) + " …</div>";
+      try {
+        const msg = await window.go.main.App.MailMessageView(readForm(), email, it.id);
+        let html = msg.bodyHtml || "";
+        if (!html && msg.bodyText) html = "<pre style='white-space:pre-wrap;'>" + esc(msg.bodyText) + "</pre>";
+        bodyBox.innerHTML =
+          "<div class='mail-body'>" +
+          "<div class='mail-subject'>" + esc(msg.subject || "(无主题)") + "</div>" +
+          "<div class='mail-head'>发件人 " + esc(msg.from) + " ｜ 收件人 " + esc(msg.to) +
+          " ｜ " + esc(String(msg.receivedAt || "").slice(5, 16)) + "</div>" +
+          "<div>" + html + "</div></div>";
+      } catch (e) {
+        bodyBox.innerHTML = '<div class="mail-body"><span class="log-error">加载正文失败: ' +
+          esc(e && e.message ? e.message : e) + "</span></div>";
+      }
+    }
+
+    /* ---------------- 初始化 ---------------- */
+    async function loadConfig() {
+      hideBanner();
+      let cfg = null;
+      try {
+        cfg = await window.go.main.App.GetConfig();
+        if (!cfg || typeof cfg !== "object") throw new Error("配置为空");
+        writeForm(cfg);
+      } catch (e) {
+        const msg = e && e.message ? e.message : String(e);
+        showBanner("加载配置失败：" + msg + " —— 已切换到默认值，可手动填写后点击「保存配置」。");
+        appendLog("error", "加载配置失败: " + msg);
+      }
+      try {
+        renderMailPoolStats(await window.go.main.App.GetHotmailStats(cfg || readForm()));
+      } catch (e) {
+        appendLog("error", "读取号池失败: " + (e && e.message ? e.message : e));
+      }
+      try {
+        renderNodePoolStats(await window.go.main.App.GetProxyPoolStats(readForm()));
+      } catch (e) { /* 节点池未初始化时忽略 */ }
+      loadMailEmails();
+    }
+
+    async function refreshProgress() {
+      try {
+        renderSummary(await window.go.main.App.GetProgress());
+      } catch (e) { /* 静默 */ }
+    }
+
+    async function init() {
+      renderLogs();
+      await loadConfig();
+      try {
+        renderSummary(await window.go.main.App.GetProgress());
+      } catch (e) {
+        appendLog("error", "读取进度失败: " + (e && e.message ? e.message : e));
+      }
+      if (window.runtime && window.runtime.EventsOn) {
+        window.runtime.EventsOn("batch:log", (p) => appendLog(p.level, p.message, p.time));
+        window.runtime.EventsOn("batch:progress", (s) => renderSummary(s));
+        window.runtime.EventsOn("hotmail:preflight", (p) => {
+          $("poolStatus").textContent = "测活 " + p.checked + "/" + p.total + "（可用 " + p.available + "，失效 " + p.skipped + "）";
+        });
+      }
+      setInterval(refreshProgress, 3000);
+    }
+
+    /* ---------------- 事件绑定 ---------------- */
+    $("mailMode").addEventListener("change", toggleMailMode);
+    $("bannerClose").addEventListener("click", hideBanner);
+    $("bannerRetry").addEventListener("click", loadConfig);
+
+    document.querySelectorAll(".tab").forEach((t) => {
+      t.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
+        t.classList.add("active");
+        document.querySelectorAll(".tabpane").forEach((p) => p.classList.remove("active"));
+        const pane = $("pane-" + t.dataset.tab);
+        if (pane) pane.classList.add("active");
+        if (t.dataset.tab === "mail") loadMailEmails();
+      });
+    });
+
+    $("btnSave").addEventListener("click", async () => {
+      try {
+        const saved = await window.go.main.App.SaveConfig(readForm());
+        writeForm(saved);
+        appendLog("info", "配置已保存");
+        toast("配置已保存", "ok");
+      } catch (e) { appendLog("error", "保存配置失败: " + e); toast("保存配置失败", "err"); }
+    });
+
+    $("btnTestPanel").addEventListener("click", async () => {
+      try {
+        const msg = await window.go.main.App.TestPanel(readForm());
+        appendLog("info", msg);
+        toast(msg);
+      } catch (e) { appendLog("error", "面板测试失败: " + e); toast("面板测试失败", "err"); }
+    });
+
+    function updateRawCount() {
+      const v = $("hotmailRaw").value || "";
+      const all = v ? v.replace(/\r\n/g, "\n").split("\n").filter((l) => l.trim()) : [];
+      const lines = all.length;
+      const valid = all.filter((l) => {
+        const f = l.split("----");
+        return f.length >= 4 && f[0].includes("@") && f[1].trim() && f[2].trim();
+      }).length;
+      const hint = lines >= 50 && valid < lines * 0.9
+        ? " ⚠ 有效行偏少，可能剪贴不完整，建议用「选择文件并导入」"
+        : "";
+      $("rawCount").textContent = "已粘贴 " + lines + " 行 / 识别有效 " + valid + " 条 / " + v.length + " 字符" + hint;
+      return lines;
+    }
+    $("hotmailRaw").addEventListener("input", updateRawCount);
+    $("hotmailRaw").addEventListener("paste", () => setTimeout(updateRawCount, 0));
+
+    $("btnImport").addEventListener("click", async () => {
+      try {
+        const n = updateRawCount();
+        if (n === 0) { appendLog("error", "号池文本为空，请粘贴内容或选择文件导入"); return; }
+        appendLog("info", "正在导入 " + n + " 行账号文本...");
+        renderMailPoolStats(await window.go.main.App.ImportHotmail(readForm()));
+        toast("号池导入完成", "ok");
+      } catch (e) { appendLog("error", "导入失败: " + e); toast("导入失败", "err"); }
+    });
+
+    $("btnImportFile").addEventListener("click", async () => {
+      const f = $("rawFile").files && $("rawFile").files[0];
+      if (!f) { appendLog("error", "请先选择 .txt 号池文件"); return; }
+      try {
+        appendLog("info", "正在读取 " + f.name + " (" + (f.size / 1024).toFixed(1) + " KB)...");
+        const text = await f.text();
+        const lines = text.replace(/\r\n/g, "\n").split("\n").filter((l) => l.trim()).length;
+        appendLog("info", "文件读取完成：" + lines + " 行，开始导入...");
+        let st;
+        if (window.go.main.App.ImportHotmailText) {
+          st = await window.go.main.App.ImportHotmailText(readForm(), text);
+        } else {
+          const fd = new FormData();
+          fd.append("file", f);
+          const token = (new URLSearchParams(location.search)).get("token") || "";
+          const resp = await fetch("/api/upload" + (token ? "?token=" + encodeURIComponent(token) : ""), { method: "POST", body: fd });
+          const up = await resp.json();
+          if (up.error) throw new Error(up.error);
+          st = await window.go.main.App.ImportHotmailFile(readForm(), up.path);
+        }
+        renderMailPoolStats(st);
+        toast("文件导入完成，可用 " + st.available + " 个", "ok");
+      } catch (e) { appendLog("error", "文件导入失败: " + e); toast("文件导入失败", "err"); }
+    });
+
+    $("btnPreflight").addEventListener("click", async () => {
+      try {
+        appendLog("info", "开始多线程测活...");
+        renderMailPoolStats(await window.go.main.App.PreflightHotmail(readForm()));
+        toast("测活完成", "ok");
+      } catch (e) { appendLog("error", "测活失败: " + e); toast("测活失败", "err"); }
+    });
+
+    $("btnRemoveSkipped").addEventListener("click", async () => {
+      try {
+        renderMailPoolStats(await window.go.main.App.RemoveSkippedHotmail(readForm()));
+        appendLog("info", "已移除失效账号");
+        toast("已移除失效账号", "ok");
+      } catch (e) { appendLog("error", String(e)); }
+    });
+
+    $("btnFetchSub").addEventListener("click", async () => {
+      try {
+        appendLog("info", "正在拉取订阅...");
+        const st = await window.go.main.App.ImportProxySubscription(readForm());
+        renderNodePoolStats(st);
+        appendLog("info", "订阅拉取完成：" + st.total + " 个节点");
+        toast("订阅拉取完成：" + st.total + " 个节点", "ok");
+      } catch (e) { appendLog("error", "拉取订阅失败: " + e); toast("拉取订阅失败", "err"); }
+    });
+    $("btnCheckPool").addEventListener("click", async () => {
+      try {
+        appendLog("info", "正在测活节点...");
+        const st = await window.go.main.App.CheckProxyPool(readForm());
+        renderNodePoolStats(st);
+        appendLog("info", "测活完成：存活 " + st.alive + " / " + st.total);
+        toast("节点测活完成，存活 " + st.alive, "ok");
+      } catch (e) { appendLog("error", "节点测活失败: " + e); toast("节点测活失败", "err"); }
+    });
+    $("btnPoolStats").addEventListener("click", async () => {
+      try {
+        renderNodePoolStats(await window.go.main.App.GetProxyPoolStats(readForm()));
+      } catch (e) { appendLog("error", "读取节点池失败: " + e); }
+    });
+
+    $("btnCheckinAll").addEventListener("click", async () => {
+      try {
+        appendLog("info", "开始批量补签...");
+        const msg = await window.go.main.App.CheckinAll(readForm());
+        appendLog("info", msg);
+        toast(msg);
+      } catch (e) { appendLog("error", "批量补签失败: " + (e && e.message ? e.message : e)); toast("批量补签失败", "err"); }
+    });
+    $("btnMailScan").addEventListener("click", async () => {
+      try {
+        appendLog("info", "开始批量收信扫描...");
+        const msg = await window.go.main.App.MailScanAll(readForm());
+        appendLog("info", msg);
+        toast(msg);
+        loadMailEmails();
+      } catch (e) { appendLog("error", "批量收信失败: " + (e && e.message ? e.message : e)); toast("批量收信失败", "err"); }
+    });
+
+    $("btnMailOpen").addEventListener("click", async () => {
+      const email = $("mailInboxEmail").value.trim();
+      if (!email) { $("mailInboxNote").textContent = "请先在上方选一个邮箱"; return; }
+      $("mailInboxNote").textContent = "加载中…";
+      $("mailInboxList").innerHTML = "";
+      $("mailMsgBody").innerHTML = "";
+      try {
+        const view = await window.go.main.App.MailInboxView(readForm(), email);
+        renderMailInbox(view);
+        const n = ((view && view.items) || []).length;
+        $("mailInboxNote").textContent = n > 0 ? "共 " + n + " 封（含垃圾箱）" : "（空）";
+      } catch (e) {
+        $("mailInboxNote").textContent = "加载失败";
+        $("mailInboxList").innerHTML = '<div class="log-line error"><span class="msg">' + esc(e && e.message ? e.message : e) + "</span></div>";
+      }
+    });
+
+    $("btnStart").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.StartBatch(readForm());
+        appendLog("info", "已启动纯 Go 协议批量注册");
+        toast("已启动注册任务", "ok");
+      } catch (e) { appendLog("error", "启动失败: " + e); toast("启动失败", "err"); }
+    });
+    $("btnStop").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.StopBatch();
+        appendLog("info", "已发送停止信号");
+      } catch (e) { appendLog("error", String(e)); }
+    });
+    $("btnSupStart").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.StartSupervised(readForm());
+        appendLog("info", "已启动监督批量（异常自动重启续跑，直到达标/号池耗尽/点停止）");
+        toast("监督批量已启动", "ok");
+      } catch (e) { appendLog("error", "监督批量启动失败: " + e); toast("监督批量启动失败", "err"); }
+    });
+    $("btnSupStop").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.StopSupervised();
+        appendLog("info", "已停止监督批量");
+      } catch (e) { appendLog("error", "停止监督失败: " + e); }
+    });
+    $("btnClear").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.ClearHistory(readForm());
+        renderSummary({ succeeded: 0, target: Number($("count").value || 0), failedAttempts: 0, running: false, results: [] });
+        appendLog("info", "已清理历史记录");
+        toast("已清理历史记录", "ok");
+      } catch (e) { appendLog("error", String(e)); }
+    });
+
+    $("btnExport").addEventListener("click", () => {
+      const list = (lastSummary && Array.isArray(lastSummary.results)) ? lastSummary.results : [];
+      if (list.length === 0) { toast("暂无账号可导出", "err"); return; }
+      const head = ["邮箱", "面板账号", "设备码", "user_code", "signInId", "签到", "时间"];
+      const rows = list.map((r) => [r.email, r.providerName, r.signInId, r.userCode, r.signInId, r.signin, r.createdAt]);
+      const csv = [head].concat(rows).map((r) => r.map((c) => '"' + String(c === undefined || c === null ? "" : c).replace(/"/g, '""') + '"').join(",")).join("\r\n");
+      const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "minimax-accounts-" + new Date().toISOString().slice(0, 10) + ".csv";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toast("已导出 " + list.length + " 条账号", "ok");
+    });
+
+    window.addEventListener("DOMContentLoaded", init);
+  </script>
+
+<script>
+window.go = { main: { App: {
+  GetConfig: async () => ({ panelBase: "https://web.open-traffic.com", panelKey: "x", panel2Base: "http://web.open-traffic.com", panel2Key: "y",
+    mailMode: "hotmail", count: 1000, workers: 2, timezoneId: "Asia/Shanghai", signinAfterRegister: true,
+    hotmailPool: "/opt/minimax/hotmail-pool.json", hotmailPreflightWorkers: 8, proxyStyle: "711", proxyUrl: "socks5://u:p@global.rotgb.trustsource.live:10000",
+    proxyRegionRotate: "JP,US,GB", proxySessTime: 15, proxySticky: true, proxySubscriptionUrl: "https://subs.2519885.dpdns.org/c/?token=ce7b0ad8f20c084448d03891f892d848",
+    proxyPoolWorkers: 16, proxyLocalPorts: "18001-18422", proxyPoolUse: true, ticketMode: "cdp", chromePath: "/usr/bin/google-chrome",
+    outputDir: "/opt/minimax/artifacts", signatureSalt: "I*7Cf%WZ#S&%1RlZJ&C2", yySuffix: "ooui", recaptchaSiteKey: "6Lc0gOUtAAAAAM6ovsGBJbA4K1La5ZAOA9B7X39k" }),
+  GetHotmailStats: async () => ({ total: 1000, available: 447, used: 553, skipped: 0, reserved: 0 }),
+  GetProxyPoolStats: async () => ({ total: 422, alive: 282, dead: 140, checked: 422 }),
+  GetProgress: async () => ({ target: 1000, succeeded: 1240, failedAttempts: 1091, currentStage: "等待面板绑定", currentEmail: "drewfasthorse01639@hotmail.com", running: true,
+    results: Array.from({length: 12}, function(_, i) { return { email: "user" + i + "@hotmail.com", providerName: "MiniMax" + (997000 + i), userCode: "M.C561_BAY.0.U.MsaArtifacts.-Cu086H", signInId: "9e5f94bc-e8a4-4e73-b8be", createdAt: "2026-11-20T13:" + (10 + i) + ":02Z" }; }) }),
+  MailListOptions: async () => ["a@hotmail.com", "b@hotmail.com"]
+}}};
+</script>
+</body>
+</html>

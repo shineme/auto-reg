@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MiniMax 协议注册工作台</title>
+  <link rel="stylesheet" href="file:///C:/Users/dhl/Desktop/m3/go-protocol/frontend/assets/app.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <button class="btn btn-icon mobile-only" id="btnRail" aria-label="打开侧栏">☰</button>
+      <div class="brand">
+        <div class="brand-mark">M</div>
+        <div class="brand-text">
+          <strong>MiniMax 协议注册工作台</strong>
+          <span>纯 Go 协议 · 零 Node.js · 面板账号自动绑定</span>
+        </div>
+      </div>
+      <div class="runstate" id="runState" data-state="idle" role="status" aria-live="polite">
+        <span class="dot"></span><span id="runStateText">待机</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <button class="btn btn-sm" id="btnPalette" title="命令面板">搜索 <span class="kbd">⌘K</span></button>
+      <button class="btn btn-sm" id="btnSettings" title="设置">设置</button>
+      <button class="btn btn-sm mobile-only" id="btnAside" title="结果面板">结果</button>
+      <button class="btn btn-sm btn-danger" id="btnStopTop" disabled>停止</button>
+    </header>
+
+    <div class="console">
+      <aside class="rail" id="rail">
+        <section class="card">
+          <div class="card-head"><span>本轮进度</span><span class="spacer"></span><span class="count" id="railUpdated">—</span></div>
+          <div class="kpi-grid">
+            <div class="kpi"><div class="k">已成功</div><div class="v accent" id="kpiOk">0</div><div class="s" id="kpiTarget">目标 0</div></div>
+            <div class="kpi"><div class="k">成功率</div><div class="v up" id="kpiRate">—</div><div class="s" id="kpiFail">失败 0</div></div>
+            <div class="kpi"><div class="k">平均每个</div><div class="v" id="kpiAvg">—</div><div class="s">注册耗时</div></div>
+            <div class="kpi"><div class="k">预计剩余</div><div class="v" id="kpiEta">—</div><div class="s" id="kpiSpeed">— 个/分钟</div></div>
+          </div>
+          <div class="meter" style="margin-top:10px;"><i id="railMeter" style="width:0%"></i></div>
+          <div class="stat-line" style="margin-top:8px;"><span class="lbl">当前阶段</span><span class="val" id="railStage">待机</span></div>
+          <div class="stat-line"><span class="lbl">当前账号</span><span class="val" id="railEmail">—</span></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><span>操作队列</span><span class="spacer"></span><span class="count">⌘K 可搜索</span></div>
+          <div class="queue" id="queue">
+            <button class="queue-item" data-cmd="sup-start">
+              <span class="qi-icon">▶</span>
+              <span class="qi-text"><b>开始监督批量</b><span>异常自动重启续跑</span></span>
+              <span class="qi-tail">S</span>
+            </button>
+            <button class="queue-item" data-cmd="sup-stop">
+              <span class="qi-icon">■</span>
+              <span class="qi-text"><b>停止监督</b><span>结束当前批量循环</span></span>
+            </button>
+            <button class="queue-item" data-cmd="import-pool">
+              <span class="qi-icon">⇩</span>
+              <span class="qi-text"><b>导入号池</b><span>Hotmail Graph 文本 / 文件</span></span>
+            </button>
+            <button class="queue-item" data-cmd="preflight">
+              <span class="qi-icon">✓</span>
+              <span class="qi-text"><b>多线程测活</b><span>校验令牌是否可用</span></span>
+            </button>
+            <button class="queue-item" data-cmd="remove-skipped">
+              <span class="qi-icon">✕</span>
+              <span class="qi-text"><b>一键移除失效</b><span>清理令牌过期账号</span></span>
+            </button>
+            <button class="queue-item" data-cmd="checkin">
+              <span class="qi-icon">★</span>
+              <span class="qi-text"><b>批量补签</b><span>每日签到领积分</span></span>
+            </button>
+            <button class="queue-item" data-cmd="mailscan">
+              <span class="qi-icon">✉</span>
+              <span class="qi-text"><b>批量收信</b><span>扫描邮箱 / 识别 Cursor</span></span>
+            </button>
+            <button class="queue-item" data-cmd="fetch-sub">
+              <span class="qi-icon">⟳</span>
+              <span class="qi-text"><b>拉取订阅</b><span>更新代理节点池</span></span>
+            </button>
+            <button class="queue-item" data-cmd="check-pool">
+              <span class="qi-icon">◎</span>
+              <span class="qi-text"><b>节点测活</b><span>筛选可用出口 IP</span></span>
+            </button>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><span>资源</span></div>
+          <div class="stat-line"><span class="lbl">邮箱号池</span><span class="val" id="poolTotal">—</span></div>
+          <div class="stat-line"><span class="lbl">可用 / 已用</span><span class="val"><span id="poolAvail">—</span> / <span id="poolUsed">—</span></span></div>
+          <div class="meter" style="margin-top:6px;"><i id="poolMeter" style="width:0%"></i></div>
+          <div class="stat-line" style="margin-top:10px;"><span class="lbl">代理节点池</span><span class="val" id="nodeTotal">—</span></div>
+          <div class="stat-line"><span class="lbl">存活 / 失效</span><span class="val"><span id="nodeAlive">—</span> / <span id="nodeDead">—</span></span></div>
+          <div class="meter is-warn" style="margin-top:6px;"><i id="nodeMeter" style="width:0%"></i></div>
+          <div class="stat-line" style="margin-top:10px;"><span class="lbl">主面板</span><span class="val" id="panel1">—</span></div>
+          <div class="stat-line"><span class="lbl">并行线路</span><span class="val" id="railWorkers">—</span></div>
+        </section>
+
+        <div class="hint" style="margin-top:auto;padding:0 2px;">
+          纯 Go 协议实现 · 无浏览器自动化脚本<br />快捷键 <span class="kbd">⌘K</span> 搜索 · <span class="kbd">S</span> 开始 · <span class="kbd">I</span> 导入 · <span class="kbd">M</span> 收件箱 · <span class="kbd">Esc</span> 关闭
+        </div>
+      </aside>
+
+      <main class="stream">
+        <div class="stream-head">
+          <div class="stream-stage">
+            <div class="stage-label"><span id="stageText">待机</span><span class="tag tag-accent" id="stageTag" hidden>运行中</span></div>
+            <div class="stage-mail" id="stageMail">尚未开始任何任务</div>
+          </div>
+          <div class="chip-row" role="group" aria-label="日志过滤">
+            <button class="chip" data-log-filter="all" aria-pressed="true">全部</button>
+            <button class="chip" data-log-filter="step" aria-pressed="false">步骤</button>
+            <button class="chip" data-log-filter="warn" aria-pressed="false">警告</button>
+            <button class="chip" data-log-filter="error" aria-pressed="false">错误</button>
+          </div>
+          <div class="stop-slot">
+            <button class="btn btn-sm btn-danger" id="btnStop" disabled>停止任务</button>
+          </div>
+        </div>
+
+        <div class="stream-body" id="streamBody">
+          <div class="stream-rail" id="streamRail"></div>
+        </div>
+
+        <div class="receipt" id="receipt">
+          <span>步骤 <b id="rcSteps">0</b></span><span class="sep">·</span>
+          <span>耗时 <b id="rcElapsed">0s</b></span><span class="sep">·</span>
+          <span>成功 <b id="rcOk">0</b></span><span class="sep">·</span>
+          <span>失败 <b id="rcFail">0</b></span><span class="sep">·</span>
+          <span>积分 <b id="rcPoints">0</b></span>
+        </div>
+      </main>
+
+      <section class="aside" id="aside">
+        <div class="tabbar" role="tablist">
+          <button class="tab" role="tab" aria-selected="true" data-tab="accounts">已绑定账号 <span class="cnt" id="tabAccCount">0</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="mail">收件箱</button>
+          <span class="spacer"></span>
+          <button class="btn btn-sm btn-quiet" id="btnExport" title="导出当前筛选结果">导出 CSV</button>
+        </div>
+
+        <div class="tabpane active" id="pane-accounts" data-tab="accounts" role="tabpanel">
+          <div class="table-tools">
+            <input class="search" id="accSearch" type="search" placeholder="搜索邮箱 / 面板账号 / 设备码" autocomplete="off" />
+            <button class="btn btn-sm btn-icon" id="btnAccRefresh" title="刷新">⟳</button>
+          </div>
+          <div class="table-wrap" id="accWrap">
+            <table>
+              <colgroup>
+                <col class="c-time" /><col class="c-mail" /><col class="c-prov" /><col class="c-code" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th class="sortable" data-sort="time" aria-sort="descending">时间<span class="arrow">↓</span></th>
+                  <th class="sortable" data-sort="email">邮箱<span class="arrow">↕</span></th>
+                  <th class="sortable" data-sort="provider">面板账号<span class="arrow">↕</span></th>
+                  <th>设备码</th>
+                </tr>
+              </thead>
+              <tbody id="accBody"></tbody>
+            </table>
+            <div class="empty" id="accEmpty" hidden>
+              <span class="glyph">◎</span>
+              <b>还没有已绑定账号</b>
+              <span class="tiny">点击「开始监督批量」开始注册，成功后账号会自动出现在这里</span>
+            </div>
+          </div>
+          <div class="table-foot">
+            <span id="accRange">共 0 条</span>
+            <span class="spacer"></span>
+            <div class="pager">
+              <button id="pgFirst" title="首页">«</button>
+              <button id="pgPrev" title="上一页">‹</button>
+              <span class="mono" id="pgInfo">1/1</span>
+              <button id="pgNext" title="下一页">›</button>
+              <button id="pgLast" title="末页">»</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="tabpane" id="pane-mail" data-tab="mail" role="tabpanel">
+          <div class="mail-head">
+            <div class="combo">
+              <input class="combo-input" id="mailEmail" placeholder="输入邮箱快速选择…" autocomplete="off"
+                role="combobox" aria-expanded="false" aria-controls="mailComboPop" aria-autocomplete="list" />
+              <span class="combo-caret">▾</span>
+              <div class="combo-pop" id="mailComboPop" role="listbox" hidden></div>
+            </div>
+            <div class="hint" id="mailNote" style="margin:6px 0 0;">支持前缀 / 子串匹配，回车打开收件箱</div>
+            <div class="quick-row">
+              <span class="qr-label">快捷</span>
+              <div class="qr-scroll" id="quickPicks"></div>
+              <button class="btn btn-sm btn-quiet" id="btnRandomMail" title="随机取一个可用邮箱并打开收件箱">随机</button>
+            </div>
+          </div>
+          <div class="mail-area" id="mailArea">
+            <div class="mail-list" id="mailList">
+              <div class="empty">
+                <span class="glyph">✉</span>
+                <b>还没有选择邮箱</b>
+                <span class="tiny">在上方输入关键字，或点「快捷」标签直接打开收件箱</span>
+              </div>
+            </div>
+            <div id="mailDetail"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+  <aside class="drawer" id="drawer" aria-label="设置" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="drawer-head">
+      <h2>设置</h2>
+      <span class="spacer"></span>
+      <button class="btn btn-sm btn-quiet" id="btnCloseDrawer">关闭 <span class="kbd">Esc</span></button>
+    </div>
+    <div class="drawer-body" id="drawerBody">
+
+      <details class="section" open data-sec="panel">
+        <summary><span class="chev">▶</span>面板绑定<span class="spacer"></span><span class="badge" id="badgePanel">—</span></summary>
+        <div class="section-body">
+          <div class="grid2">
+            <div class="field"><label for="panelBase">面板地址</label><input id="panelBase" spellcheck="false" placeholder="https://web.open-traffic.com" /></div>
+            <div class="field"><label for="panelKey">面板密码 / Key</label><input id="panelKey" type="password" /></div>
+            <div class="field"><label for="panel2Base">面板 2 地址 <em>可选，多路分摊</em></label><input id="panel2Base" spellcheck="false" placeholder="留空则只用主面板" /></div>
+            <div class="field"><label for="panel2Key">面板 2 密码 / Key</label><input id="panel2Key" type="password" /></div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-sm" id="btnTestPanel">测试面板连接</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="section" open data-sec="task">
+        <summary><span class="chev">▶</span>注册任务<span class="spacer"></span><span class="badge" id="badgeTask">—</span></summary>
+        <div class="section-body">
+          <div class="grid2">
+            <div class="field">
+              <label for="mailMode">接码模式</label>
+              <select id="mailMode">
+                <option value="hotmail">Hotmail Graph 号池</option>
+                <option value="imap">域名邮箱 + IMAP</option>
+              </select>
+            </div>
+            <div class="field"><label for="count">目标成功数量</label><input id="count" type="number" min="1" max="5000" /></div>
+            <div class="field"><label for="workers">并行线路数 <em>1-16</em></label><input id="workers" type="number" min="1" max="16" /></div>
+            <div class="field"><label for="timezoneId">签到时区 <em>timezone_id</em></label><input id="timezoneId" placeholder="Asia/Shanghai" spellcheck="false" /></div>
+          </div>
+          <label class="switch"><input type="checkbox" id="captchaDirect" /><span class="track"></span><span class="sw-text">验证码页面直连<em>代理不稳时勾选</em></span></label>
+          <label class="switch"><input type="checkbox" id="mailViaProxy" /><span class="track"></span><span class="sw-text">邮箱取码走代理<em>默认直连，代理失效时别勾</em></span></label>
+          <label class="switch"><input type="checkbox" id="signinAfterRegister" /><span class="track"></span><span class="sw-text">注册后自动签到领积分<em>MiniMax Code 每日签到</em></span></label>
+        </div>
+      </details>
+
+      <details class="section" data-sec="mail">
+        <summary><span class="chev">▶</span>邮箱与收件<span class="spacer"></span><span class="badge" id="badgeMail">—</span></summary>
+        <div class="section-body">
+          <div id="hotmailBox">
+            <div class="dropzone" id="rawDrop">
+              <div class="field">
+                <label for="hotmailRaw">Hotmail Graph 文本 <em>email----pass----clientId----refreshToken</em></label>
+                <textarea id="hotmailRaw" placeholder="粘贴 Hotmail 账号行后点击「导入号池」；也可把 .txt 文件直接拖到这里"></textarea>
+                <div class="hint" id="rawCount" style="margin-top:5px;">已粘贴 0 行 / 0 字符</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+              <input type="file" id="rawFile" accept=".txt" />
+              <button class="btn btn-sm" id="btnImportFile">选择文件并导入</button>
+            </div>
+            <div class="grid2">
+              <div class="field"><label for="hotmailPool">号池文件路径</label><input id="hotmailPool" spellcheck="false" /></div>
+              <div class="field"><label for="hotmailPreflightWorkers">测活并发线程</label><input id="hotmailPreflightWorkers" type="number" min="1" max="32" /></div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-sm btn-primary" id="btnImport">导入号池</button>
+              <button class="btn btn-sm" id="btnPreflight">多线程测活</button>
+              <button class="btn btn-sm btn-danger" id="btnRemoveSkipped">一键移除失效</button>
+            </div>
+          </div>
+          <div id="imapBox" hidden>
+            <div class="grid2">
+              <div class="field"><label for="mailDomain">邮箱域名</label><input id="mailDomain" spellcheck="false" /></div>
+              <div class="field"><label for="mailPrefix">邮箱前缀</label><input id="mailPrefix" spellcheck="false" /></div>
+              <div class="field"><label for="imapHost">IMAP 主机</label><input id="imapHost" spellcheck="false" /></div>
+              <div class="field"><label for="imapPort">IMAP 端口</label><input id="imapPort" type="number" /></div>
+              <div class="field"><label for="imapUser">IMAP 账号</label><input id="imapUser" spellcheck="false" /></div>
+              <div class="field"><label for="imapPassword">IMAP 授权码</label><input id="imapPassword" type="password" /></div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="section" data-sec="proxy">
+        <summary><span class="chev">▶</span>代理与节点池<span class="spacer"></span><span class="badge" id="badgeProxy">—</span></summary>
+        <div class="section-body">
+          <div class="field"><label for="proxyUrl">代理地址 <em>socks5:// / http:// / 紧凑格式</em></label><input id="proxyUrl" placeholder="留空直连" spellcheck="false" /></div>
+          <div class="grid2">
+            <div class="field">
+              <label for="proxyStyle">代理商家类型</label>
+              <select id="proxyStyle">
+                <option value="auto">自动识别（cliproxy / 711）</option>
+                <option value="711">711（session- + sessTime-）</option>
+                <option value="clipproxy">Cliproxy（sid- + t- + st-）</option>
+              </select>
+            </div>
+            <div class="field"><label for="proxyState">Cliproxy 州省 <em>可选</em></label><input id="proxyState" placeholder="留空=不限" spellcheck="false" /></div>
+            <div class="field"><label for="proxyRegionRotate">代理区域轮换 <em>逗号分隔</em></label><input id="proxyRegionRotate" placeholder="如 JP,US,GB" spellcheck="false" /></div>
+            <div class="field"><label for="proxySessTime">Sticky 时长 <em>分钟 5-180</em></label><input id="proxySessTime" type="number" min="0" max="180" placeholder="0=默认" /></div>
+          </div>
+          <label class="switch"><input type="checkbox" id="proxySticky" /><span class="track"></span><span class="sw-text">启用 Sticky 会话<em>关闭=每请求换 IP</em></span></label>
+          <div class="field" style="margin-top:8px;"><label for="proxySubscriptionUrl">订阅地址 <em>Clash YAML / base64 链接列表</em></label><input id="proxySubscriptionUrl" placeholder="https://…/sub?token=…" spellcheck="false" /></div>
+          <div class="grid2">
+            <div class="field"><label for="proxyPoolFile">节点池文件路径</label><input id="proxyPoolFile" placeholder="留空=输出目录/proxy-pool.json" spellcheck="false" /></div>
+            <div class="field"><label for="proxyPoolWorkers">测活并发线程</label><input id="proxyPoolWorkers" type="number" min="1" max="64" /></div>
+            <div class="field"><label for="proxyLocalPorts">本地代理端口池 <em>18001-18422</em></label><input id="proxyLocalPorts" placeholder="如 18001-18422" spellcheck="false" /></div>
+          </div>
+          <label class="switch"><input type="checkbox" id="proxyPoolUse" /><span class="track"></span><span class="sw-text">使用节点池<em>每次尝试轮换出口 IP</em></span></label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+            <button class="btn btn-sm" id="btnFetchSub">拉取订阅</button>
+            <button class="btn btn-sm" id="btnCheckPool">节点测活</button>
+            <button class="btn btn-sm btn-quiet" id="btnPoolStats">刷新状态</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="section" data-sec="adv">
+        <summary><span class="chev">▶</span>高级<span class="spacer"></span><span class="badge">一般无需改动</span></summary>
+        <div class="section-body">
+          <div class="field"><label for="fixedPassword">固定密码 <em>留空=随机强密码；填写则全部账号共用（排查 1200058）</em></label><input id="fixedPassword" type="text" placeholder="如 DD890528@?" spellcheck="false" /></div>
+          <div class="grid2">
+            <div class="field">
+              <label for="ticketMode">票据模式</label>
+              <select id="ticketMode">
+                <option value="cdp">纯 Go CDP 取票（无 Node）</option>
+                <option value="external">外部票据接口（无浏览器）</option>
+              </select>
+            </div>
+            <div class="field"><label for="externalTicketUrl">外部票据接口 URL</label><input id="externalTicketUrl" placeholder="http://127.0.0.1:9000/ticket" spellcheck="false" /></div>
+            <div class="field"><label for="signatureSalt">SIGNATURE_SALT</label><input id="signatureSalt" type="password" /></div>
+            <div class="field"><label for="yySuffix">YY_SUFFIX</label><input id="yySuffix" type="password" /></div>
+            <div class="field"><label for="recaptchaSiteKey">RECAPTCHA_SITE_KEY</label><input id="recaptchaSiteKey" spellcheck="false" /></div>
+            <div class="field"><label for="chromePath">Chrome 路径</label><input id="chromePath" spellcheck="false" /></div>
+          </div>
+          <div class="field"><label for="outputDir">输出目录</label><input id="outputDir" spellcheck="false" /></div>
+          <button class="btn btn-sm btn-quiet" id="btnClear">清理历史记录</button>
+        </div>
+      </details>
+    </div>
+    <div class="drawer-foot">
+      <span class="hint" id="dirtyHint">配置已保存</span>
+      <span class="spacer"></span>
+      <button class="btn btn-sm" id="btnRevert">放弃修改</button>
+      <button class="btn btn-sm btn-primary" id="btnSave">保存配置</button>
+    </div>
+  </aside>
+
+  <div class="palette" id="palette" role="dialog" aria-modal="true" aria-label="命令面板">
+    <input class="palette-input" id="paletteInput" placeholder="搜索操作、邮箱或设置项…" autocomplete="off" role="combobox" aria-expanded="true" aria-controls="paletteList" />
+    <div class="palette-list" id="paletteList" role="listbox"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">↑</span><span class="kbd">↓</span> 选择</span>
+      <span><span class="kbd">Enter</span> 执行</span>
+      <span><span class="kbd">Esc</span> 关闭</span>
+      <span class="spacer" style="flex:1"></span>
+      <span id="paletteHint">操作 · 邮箱 · 设置</span>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <div class="banner" id="banner" role="alert">
+    <span id="bannerText"></span>
+    <span class="spacer"></span>
+    <button class="btn btn-sm" id="bannerRetry">重试</button>
+    <button class="btn btn-sm btn-quiet" id="bannerClose">忽略</button>
+  </div>
+
+  <script src="file:///C:/Users/dhl/Desktop/m3/go-protocol/frontend/assets/app.js"></script>
+<script>
+function mkRows(n, offset) {
+  var out = [];
+  var prov = ["MiniMax997066","MiniMax997970","MiniMax997132","MiniMax998041","MiniMax998310","MiniMax998774"];
+  for (var i = 0; i < n; i++) {
+    var k = offset + i;
+    out.push({
+      email: "drewfasthorse" + (16390 + k) + "@hotmail.com",
+      providerName: prov[k % prov.length],
+      userCode: "M.C561_BAY.0.U.MsaArtifacts.-Cu086H!tUqurVdXcnnnxTZZ56BiV2qFnosbfAbMxUB",
+      signInId: "9e5f94bc-e8a4-4e73-b8be-63364c29d753",
+      signin: true,
+      createdAt: "2026-11-20T13:" + (10 + (k % 40)) + ":02Z"
+    });
+  }
+  return out;
+}
+window.go = { main: { App: {
+  GetConfig: async () => ({
+    panelBase: "https://token.shortxmax.com", panelKey: "cbe562d176daaffdc4fde0859dffce85",
+    panel2Base: "http://web.open-traffic.com", panel2Key: "cbe562d176daaffdc4fde0859dffce85",
+    mailMode: "hotmail", count: 2000, workers: 8, timezoneId: "Asia/Shanghai",
+    signinAfterRegister: true, captchaDirect: false, mailViaProxy: false,
+    hotmailPool: "/opt/minimax/hotmail-pool.json", hotmailPreflightWorkers: 8,
+    proxyStyle: "711", proxyUrl: "socks5://USER278923-zone-custom-region-JP:b36958:global.rotgb.trustsource.live:10000",
+    proxyRegionRotate: "JP,US,GB", proxySessTime: 15, proxySticky: true,
+    proxySubscriptionUrl: "https://subs.2519885.dpdns.org/c/?token=ce7b0ad8f20c084448d03891f892d848",
+    proxyPoolWorkers: 16, proxyLocalPorts: "18001-18422", proxyPoolUse: true,
+    ticketMode: "cdp", chromePath: "/usr/bin/google-chrome",
+    outputDir: "/opt/minimax/artifacts", signatureSalt: "I*7Cf%WZ#S&%1RlZJ&C2",
+    yySuffix: "ooui", recaptchaSiteKey: "6Lc0gOUtAAAAAM6ovsGBJbA4K1La5ZAOA9B7X39k",
+    fixedPassword: ""
+  }),
+  GetHotmailStats: async () => ({ total: 4854, available: 3031, used: 1820, skipped: 0, reserved: 3 }),
+  GetProxyPoolStats: async () => ({ total: 422, alive: 282, dead: 140, checked: 422 }),
+  GetProgressLite: async () => ({ target: 2000, succeeded: 1275, failedAttempts: 1111,
+    currentStage: "等待面板绑定完成", currentEmail: "drewfasthorse01639@hotmail.com",
+    running: true, updatedAt: "2026-11-20T13:16:20Z", points: 400, firstAt: "2026-11-20T11:04:00Z", lastAt: "2026-11-20T13:16:20Z" }),
+  GetResultsPage: async (cfg, off, lim, q, sort) => ({ total: 1275, offset: off, limit: lim, rows: mkRows(lim, off) }),
+  SearchMailboxes: async (cfg, q, lim) => {
+    var names = ["drewfasthorse01639@hotmail.com","estellsaigal558738@hotmail.com","shirlietallchief100485@hotmail.com",
+      "concettakohloff802356@hotmail.com","ariettaseigrist47703@hotmail.com","ashamathie51679@hotmail.com"];
+    var st = ["available","used","reserved","skipped","used","available"];
+    var out = [];
+    for (var i = 0; i < names.length; i++) {
+      if (!q || names[i].indexOf(q) >= 0) out.push({ email: names[i], status: st[i], note: st[i] === "available" ? "" : "已注册" });
+    }
+    return out;
+  },
+  MailInboxView: async () => ({ items: [
+    { id: "m1", subject: "登录 Cursor", from: "no-reply@cursor.sh", to: "stoneydeucher952151@hotmail.com", folder: "inbox", isRead: false, receivedAt: "2026-11-18T13:07:00Z" },
+    { id: "m2", subject: "MiniMax Code 验证码", from: "no-reply@minimax.io", to: "x@hotmail.com", folder: "inbox", isRead: true, receivedAt: "2026-11-18T12:41:00Z" },
+    { id: "m3", subject: "Microsoft 账户安全代码", from: "account-security-noreply@accountprotection.microsoft.com", to: "x@hotmail.com", folder: "junkemail", isRead: false, receivedAt: "2026-11-18T09:02:00Z" }
+  ] }),
+  MailMessageView: async () => ({ subject: "登录 Cursor", from: "no-reply@cursor.sh", to: "stoneydeucher952151@hotmail.com",
+    receivedAt: "2026-11-18T13:07:00Z",
+    bodyText: "点击下面的链接登录 Cursor：https://cursor.sh/login?code=xxxxxx" }),
+  TestPanel: async () => "面板连接正常（MiniMax Code 已授权）",
+  SaveConfig: async (c) => c,
+  ImportHotmail: async () => ({ total: 4854, available: 3031, used: 1820 }),
+  ImportHotmailText: async () => ({ total: 4854, available: 3031, used: 1820 }),
+  PreflightHotmail: async () => ({ total: 4854, available: 3031, used: 1820 }),
+  RemoveSkippedHotmail: async () => ({ total: 4854, available: 3031, used: 1820 }),
+  ImportProxySubscription: async () => ({ total: 422, alive: 282, dead: 140 }),
+  CheckProxyPool: async () => ({ total: 422, alive: 282, dead: 140 }),
+  CheckinAll: async () => "补签完成：1275 个账号",
+  MailScanAll: async () => "扫描完成：1000/1000，Cursor 注册 200",
+  ClearHistory: async () => null,
+  StartSupervised: async () => null,
+  StopBatch: async () => null,
+  StopSupervised: async () => null
+}}};
+window.runtime = { EventsOn: (n, cb) => {
+  if (n === "batch:log") {
+    var logs = [
+      ["info", "[06:16:20] [info] [drewfasthorse01639@hotmail.com] 申请设备码"],
+      ["info", "[06:16:20] [info] [drewfasthorse01639@hotmail.com] 获取风控票据"],
+      ["error", "[06:16:20] [error] 获取票据失败: read tcp 127.0.0.1:58446->127.0.0.1:45039: i/o timeout"],
+      ["info", "[06:16:23] [info] 等待面板绑定完成"],
+      ["info", "[06:17:04] [info] 注册并绑定成功: drewfasthorse01639@hotmail.com -> MiniMax997066"],
+      ["info", "[06:17:07] [info] 每日签到领取积分"]
+    ];
+    logs.forEach(function (l) { cb({ level: l[0], message: l[1], time: "06:16:20" }); });
+  }
+  if (n === "batch:step") {
+    var steps = ["申请设备码","获取风控票据","注册设备","检查账号状态","发送邮箱验证码","轮询邮箱验证码","创建密码并登录","设备授权审批","等待面板绑定完成","每日签到领取积分"];
+    steps.forEach(function (s, i) { cb({ stage: s, email: "drewfasthorse01639@hotmail.com", worker: (i % 8) + 1, time: "06:16:20" }); });
+  }
+} };
+setTimeout(function () {
+  var h = (location.hash || "").replace("#", "");
+  if (h === "mail") document.querySelector('.tab[data-tab="mail"]').click();
+  if (h === "drawer") document.getElementById("btnSettings").click();
+  if (h === "palette") document.getElementById("btnPalette").click();
+  if (h === "combo") {
+    var el = document.getElementById("mailEmail");
+    el.focus();
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}, 900);
+
+setTimeout(function () {
+  var p = document.querySelector(".palette");
+  var cs = getComputedStyle(p);
+  var d = document.createElement("div");
+  d.id = "dbg";
+  d.textContent = JSON.stringify({
+    open: p.className,
+    bg: cs.backgroundColor,
+    opacity: cs.opacity,
+    z: cs.zIndex
+  });
+  document.body.appendChild(d);
+}, 1700);
+
+
+
+setTimeout(function () {
+  var row = document.querySelector(".quick-row");
+  var sc = document.getElementById("quickPicks");
+  var btn = document.getElementById("btnRandomMail");
+  var d = document.createElement("div");
+  d.id = "dbg2";
+  d.textContent = JSON.stringify({
+    rowW: row ? Math.round(row.getBoundingClientRect().width) : -1,
+    rowRight: row ? Math.round(row.getBoundingClientRect().right) : -1,
+    scW: sc ? Math.round(sc.getBoundingClientRect().width) : -1,
+    scRight: sc ? Math.round(sc.getBoundingClientRect().right) : -1,
+    btnW: btn ? Math.round(btn.getBoundingClientRect().width) : -1,
+    btnRight: btn ? Math.round(btn.getBoundingClientRect().right) : -1,
+    btnDisplay: btn ? getComputedStyle(btn).display : ""
+  });
+  document.body.appendChild(d);
+}, 1700);
+
+
+</script>
+</body>
+</html>

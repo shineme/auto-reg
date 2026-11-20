@@ -26,8 +26,16 @@ export function GetProgress() {
   return window['go']['main']['App']['GetProgress']();
 }
 
+export function GetProgressLite() {
+  return window['go']['main']['App']['GetProgressLite']();
+}
+
 export function GetProxyPoolStats(arg1) {
   return window['go']['main']['App']['GetProxyPoolStats'](arg1);
+}
+
+export function GetResultsPage(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['GetResultsPage'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function ImportHotmail(arg1) {
@@ -74,8 +82,16 @@ export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
 }
 
+export function SearchMailboxes(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SearchMailboxes'](arg1, arg2, arg3);
+}
+
 export function StartBatch(arg1) {
   return window['go']['main']['App']['StartBatch'](arg1);
+}
+
+export function StartCursorBinding(arg1, arg2) {
+  return window['go']['main']['App']['StartCursorBinding'](arg1, arg2);
 }
 
 export function StartSupervised(arg1) {
@@ -84,6 +100,10 @@ export function StartSupervised(arg1) {
 
 export function StopBatch() {
   return window['go']['main']['App']['StopBatch']();
+}
+
+export function StopCursorBinding() {
+  return window['go']['main']['App']['StopCursorBinding']();
 }
 
 export function StopSupervised() {

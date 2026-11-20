@@ -8,6 +8,7 @@ This repository contains source only. It does not contain panel keys, IMAP app p
 
 - `app/`: Go + Wails desktop GUI, proxy bridge, and supervisor launcher.
 - `scripts/`: Node protocol helpers, IMAP polling, batch runner, supervisor, and offline tests.
+  Includes `hotmail-graph.mjs` for Outlook/Hotmail Graph import, pool management, and verification-code polling.
 - `PROTOCOL.md`: sanitized protocol notes with placeholders.
 - `PRODUCT.md`, `DESIGN.md`, `.impeccable/design.json`: UI design notes.
 
@@ -17,6 +18,7 @@ Use `scripts/run-minimax-batch.env.example.ps1` as a template. Fill, at minimum:
 
 - `PANEL_BASE`, `PANEL_KEY`
 - `IMAP_HOST`, `IMAP_PORT`, `IMAP_USER`, `IMAP_PASSWORD`, `MAIL_DOMAIN`
+- `MAIL_MODE=hotmail` with `HOTMAIL_POOL_PATH` when using Graph mailboxes instead of domain IMAP
 - `MINIMAX_PROXY_URL` when a proxy is required
 - `MINIMAX_SIGNATURE_SALT`, `MINIMAX_YY_SUFFIX`, `MINIMAX_RECAPTCHA_SITE_KEY` from the operator's own authorized integration or provider-published client assets
 

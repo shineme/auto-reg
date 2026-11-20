@@ -12,27 +12,36 @@ const imapUser = process.env.IMAP_USER || "";
 const imapPassword = process.env.IMAP_PASSWORD || "";
 const mailDomain = process.env.MAIL_DOMAIN || "example.com";
 const mailPrefix = process.env.MAIL_PREFIX || "mm";
+const mailMode = String(process.env.MAIL_MODE || "imap").toLowerCase();
+const useHotmail = mailMode === "hotmail" || mailMode === "hotmail-graph";
 const proxyUrl = process.env.MINIMAX_PROXY_URL || "";
 const cdpHost = process.env.CDP_HOST || "127.0.0.1";
 const chromePath = process.env.CHROME_PATH || "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const batchRoot = process.env.BATCH_ROOT || path.join(workspace, "artifacts", "fast-batch");
 const batchId = process.env.BATCH_ID || new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
 const root = path.join(batchRoot, batchId);
+const hotmailPoolPath = process.env.HOTMAIL_POOL_PATH || path.join(batchRoot, "hotmail-pool.json");
+const hotmailClient = path.join(workspace, "scripts", "hotmail-graph.mjs");
 const chromeProfileRoot = process.env.CHROME_PROFILE_ROOT || path.join(root, "chrome-profiles");
 const summaryPath = path.join(root, "summary.json");
 const count = Number(process.env.COUNT || 1);
 const targetSuccessCount = Math.max(1, Number(process.env.TARGET_SUCCESS_COUNT || count));
+const workers = Math.max(1, Math.min(8, Number(process.env.WORKERS || process.env.MINIMAX_WORKERS || 1) || 1));
+const upstreamProxyUrl = process.env.MINIMAX_UPSTREAM_PROXY_URL || "";
+const bridgeServerPath = process.env.PROXY_BRIDGE_SERVER || path.join(workspace, "app", "cmd", "proxy-bridge-server", "proxy-bridge-server.exe");
 const cdpStartupTimeoutMs = Math.max(5000, Number(process.env.CDP_STARTUP_TIMEOUT_MS || 30000));
+const cdpCommandTimeoutMs = Math.max(10000, Number(process.env.CDP_COMMAND_TIMEOUT_MS || 90000));
 const restartCount = Number(process.env.MINIMAX_RESTART_COUNT || 0);
 const dryRun = process.env.DRY_RUN === "1";
 const panelCheckOnly = process.env.PANEL_CHECK_ONLY === "1";
 const signInPollSeconds = Number(process.env.SIGN_IN_POLL_SECONDS || 90);
-const captchaReadyAttempts = Number(process.env.CAPTCHA_READY_ATTEMPTS || 60);
+const captchaReadyAttempts = Number(process.env.CAPTCHA_READY_ATTEMPTS || 14);
 const captchaPrewarmUrl = process.env.CAPTCHA_PREWARM_URL || "https://account.minimax.io/unified-login";
 const captchaUnavailablePattern = /reCAPTCHA Enterprise did not become ready|reCAPTCHA Enterprise returned no ticket|CDP browser did not become ready|CDP version HTTP/i;
 const siteKey = process.env.MINIMAX_RECAPTCHA_SITE_KEY || "";
 const captchaAction = "send_code";
 const captchaPrewarmHost = "account.minimax.io";
+const captchaBypassList = process.env.CAPTCHA_BYPASS_LIST || "";
 const uniqueUserIdKey = "mmx_account_UNIQUE_USER_ID";
 const deviceIdKey = "mmx_account_USER_HARD_WARE_INFO";
 const userDetailKey = "user_detail_agent";
@@ -40,8 +49,8 @@ const screenWidth = 3440;
 const screenHeight = 1440;
 
 const panelCookies = new Map();
-const pendingCommands = new Map();
-let nextCommandId = 1;
+const panelQueue = { chain: Promise.resolve() };
+const stateQueue = { chain: Promise.resolve() };
 let progressState = {
   target: targetSuccessCount,
   succeeded: 0,
@@ -53,6 +62,28 @@ let progressState = {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function rotateProxySession(reason = "") {
+  if (!proxyUrl) return false;
+  try {
+    const parsed = new URL(proxyUrl);
+    if (!["127.0.0.1", "localhost", "::1"].includes(parsed.hostname)) {
+      emitProgress("proxy-rotate", reason ? `准备新账号：${reason}` : "准备新账号");
+      return false;
+    }
+    const response = await fetch(new URL("/__rotate", parsed), { method: "POST" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    emitProgress("proxy-rotate", reason ? `已切换代理出口：${reason}` : "已切换代理出口");
+    return true;
+  } catch (error) {
+    if (/405|404/.test(error.message || "")) {
+      emitProgress("proxy-rotate", reason ? `代理会话继续复用：${reason}` : "代理会话继续复用");
+      return false;
+    }
+    emitProgress("proxy-rotate", `代理出口检查异常：${error.message || error}`);
+    return false;
+  }
 }
 
 function withTimeout(promise, timeoutMs, label) {
@@ -124,6 +155,46 @@ function updateProgressState(results, current) {
   progressState.current = current;
 }
 
+
+function enqueueState(task) {
+  const next = stateQueue.chain.then(task, task);
+  stateQueue.chain = next.catch(() => {});
+  return next;
+}
+
+async function createStickyProxyBridge(label = "worker") {
+  if (!upstreamProxyUrl) {
+    return { proxyUrl, cleanup: async () => {} };
+  }
+  if (!(await pathExists(bridgeServerPath))) {
+    throw new Error(`proxy bridge server missing: ${bridgeServerPath}`);
+  }
+  const portFile = path.join(root, `proxy-bridge-${String(label).replace(/[^a-zA-Z0-9_-]/g, "-")}-${process.pid}-${crypto.randomBytes(3).toString("hex")}.url`);
+  await fs.rm(portFile, { force: true });
+  const child = spawn(bridgeServerPath, [upstreamProxyUrl, portFile], { stdio: "ignore", windowsHide: true });
+  const deadline = Date.now() + 15000;
+  let local = "";
+  while (Date.now() < deadline) {
+    try {
+      local = (await fs.readFile(portFile, "utf8")).trim();
+      if (local.startsWith("http://")) break;
+    } catch {}
+    if (!processIsAlive(child.pid)) throw new Error("proxy bridge exited early");
+    await delay(100);
+  }
+  if (!local.startsWith("http://")) {
+    await terminateProcessTree(child);
+    throw new Error("proxy bridge did not publish local URL");
+  }
+  return {
+    proxyUrl: local,
+    cleanup: async () => {
+      await terminateProcessTree(child);
+      await fs.rm(portFile, { force: true });
+    },
+  };
+}
+
 function emitProgress(phase, message, extra = {}) {
   const event = {
     type: "progress",
@@ -186,6 +257,62 @@ async function loadExistingResults() {
   return { results, nextIndex };
 }
 
+async function reconcileIncompleteAccounts() {
+  if (!useHotmail) return { repaired: 0 };
+  const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
+  let repaired = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith("account-")) continue;
+    const runDir = path.join(root, entry.name);
+    const resultPath = path.join(runDir, "result.json");
+    if (await pathExists(resultPath)) continue;
+    const config = await readJson(path.join(runDir, "run-config.json")).catch(() => null);
+    const flow = await readJson(path.join(runDir, "flow.json")).catch(() => null);
+    const email = config?.email || flow?.email || "";
+    if (!email) continue;
+    const error = flow?.error || (flow?.status === "failed" ? "registration failed before result was saved" : "interrupted before result was saved");
+    const result = {
+      ok: false,
+      email,
+      password: config?.password || "",
+      userCode: config?.userCode || "",
+      error,
+      runDir,
+      completedAt: new Date().toISOString(),
+      repairedAt: new Date().toISOString(),
+    };
+    await writeJson(resultPath, result);
+    // Only touch the pool when this email is still reserved for an in-flight attempt.
+    // Otherwise we can accidentally downgrade used/skipped accounts after restarts.
+    try {
+      const pool = await readJson(hotmailPoolPath);
+      const current = (pool.accounts || []).find((account) => String(account.email || "").toLowerCase() === String(email).toLowerCase());
+      if (current?.status === "reserved") {
+        await finalizeHotmailAccount({ email, userCode: config?.userCode || "", signInId: "" }, result);
+      }
+    } catch {
+      // Keep repaired result.json even if pool inspection fails.
+    }
+    repaired += 1;
+    emitProgress("hotmail-pool", `已补记中断账号并跳过/释放：${email}`);
+  }
+  return { repaired };
+}
+
+function failureBackoffMs(error) {
+  const text = String(error || "");
+  if (/requests are too frequent|send-code:\s*32\b|status_code\D*32\b/i.test(text)) {
+    return Math.max(0, Number(process.env.MINIMAX_RATE_LIMIT_BACKOFF_MS ?? 15000));
+  }
+  if (/1200063|人机验证未通过|Verification failed, please try again/i.test(text)) {
+    return Math.max(0, Number(process.env.MINIMAX_CAPTCHA_FAIL_BACKOFF_MS ?? 3000));
+  }
+  if (/interrupted before result was saved|request timeout|CDP .* timed out/i.test(text)) {
+    return Math.max(0, Number(process.env.MINIMAX_SOFT_FAIL_BACKOFF_MS ?? 2000));
+  }
+  return Math.max(0, Number(process.env.MINIMAX_ACCOUNT_GAP_MS ?? 1500));
+}
+
 function cookieHeader() {
   return [...panelCookies.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
 }
@@ -194,6 +321,7 @@ function redactText(value) {
   return String(value)
     .replace(/(^|[?&])((?:k|key|token|password|secret|ticket|auth|authorization|code)=)[^&\s"'<>]+/gi, "$1$2***")
     .replace(/(PANEL_KEY|IMAP_PASSWORD|ticket|Proxy-Authorization|Authorization)([=:]\s*)[^\s,;]+/gi, "$1$2***")
+    .replace(/(HOTMAIL_RAW|HOTMAIL_ACCOUNT_JSON|HOTMAIL_REFRESH_TOKEN|refreshToken|refresh_token)([=:]\s*)[^\s,;]+/gi, "$1$2***")
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1***");
 }
 
@@ -223,6 +351,7 @@ function storeSetCookie(response) {
 }
 
 async function panelFetch(pathname, options = {}, expectJson = true) {
+  const run = async () => {
   const requestUrl = new URL(pathname, panelBase);
   let method = options.method || "GET";
   const body = options.body;
@@ -234,7 +363,20 @@ async function panelFetch(pathname, options = {}, expectJson = true) {
     if (panelCookies.size) headers.set("Cookie", cookieHeader());
     const requestOptions = { method, headers, redirect: "manual" };
     if (body !== undefined && redirectCount === 0) requestOptions.body = body;
-    response = await fetch(currentUrl, requestOptions);
+    const networkAttempts = method === "GET" ? 4 : 1;
+    let networkError = null;
+    for (let attempt = 0; attempt < networkAttempts; attempt += 1) {
+      try {
+        response = await fetch(currentUrl, requestOptions);
+        networkError = null;
+        break;
+      } catch (error) {
+        networkError = error;
+        if (attempt + 1 >= networkAttempts) break;
+        await delay(1200 * (attempt + 1));
+      }
+    }
+    if (networkError) throw networkError;
     storeSetCookie(response);
     const location = response.headers.get("location");
     if ([301, 302, 303, 307, 308].includes(response.status) && location) {
@@ -253,6 +395,10 @@ async function panelFetch(pathname, options = {}, expectJson = true) {
   } catch {
     throw new Error(`${method} ${safePath(pathname)} did not return JSON: ${redactText(text.slice(0, 500))}`);
   }
+  };
+  const next = panelQueue.chain.then(run, run);
+  panelQueue.chain = next.catch(() => {});
+  return next;
 }
 
 async function cdpVersion(port) {
@@ -288,9 +434,9 @@ async function reserveCdpPort() {
   return port;
 }
 
-function chromeProxyArgument() {
-  if (!proxyUrl) return "";
-  const parsed = new URL(proxyUrl);
+function chromeProxyArgument(localProxy = proxyUrl) {
+  if (!localProxy) return "";
+  const parsed = new URL(localProxy);
   if (!["http:", "https:", "socks5:"].includes(parsed.protocol)) throw new Error(`Unsupported Chrome proxy scheme: ${parsed.protocol}`);
   if (parsed.protocol === "socks5:") return `socks5://${parsed.host}`;
   const credentials = parsed.username
@@ -299,7 +445,7 @@ function chromeProxyArgument() {
   return `${parsed.protocol}//${credentials}${parsed.host}`;
 }
 
-async function startCdpBrowser(profileDir) {
+async function startCdpBrowser(profileDir, localProxy = proxyUrl) {
   await fs.rm(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   await fs.mkdir(profileDir, { recursive: true });
   const port = await reserveCdpPort();
@@ -317,8 +463,11 @@ async function startCdpBrowser(profileDir) {
     "--window-position=-32000,-32000",
     `--window-size=${screenWidth},${screenHeight}`,
   ];
-  const proxyArgument = chromeProxyArgument();
-  if (proxyArgument) args.push(`--proxy-server=${proxyArgument}`);
+  const proxyArgument = chromeProxyArgument(localProxy);
+  if (proxyArgument) {
+    args.push(`--proxy-server=${proxyArgument}`);
+    if (captchaBypassList) args.push(`--proxy-bypass-list=${captchaBypassList}`);
+  }
   args.push("about:blank");
   const child = spawn(chromePath, args, { stdio: "ignore", windowsHide: true });
   const browser = { child, profileDir, version: null, port: 0 };
@@ -333,13 +482,13 @@ async function startCdpBrowser(profileDir) {
   }
 }
 
-function cdpCall(socket, method, params = {}, sessionId) {
-  const id = nextCommandId++;
+function cdpCall(socket, pendingCommands, nextIdRef, method, params = {}, sessionId) {
+  const id = nextIdRef.value++;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingCommands.delete(id);
       reject(new Error(`CDP ${method} timed out`));
-    }, 30000);
+    }, cdpCommandTimeoutMs);
     pendingCommands.set(id, {
       resolve: (value) => {
         clearTimeout(timer);
@@ -364,6 +513,9 @@ function cdpCall(socket, method, params = {}, sessionId) {
 
 function connectCdpSocket(version) {
   const socket = new WebSocket(version.webSocketDebuggerUrl);
+  const pendingCommands = new Map();
+  const eventHandlers = new Set();
+  const nextIdRef = { value: 1 };
   let readySettled = false;
   let rejectReady;
   const ready = new Promise((resolve, reject) => {
@@ -380,7 +532,13 @@ function connectCdpSocket(version) {
   });
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
-    if (!message.id || !pendingCommands.has(message.id)) return;
+    if (!message.id) {
+      for (const handler of eventHandlers) {
+        try { handler(message); } catch {}
+      }
+      return;
+    }
+    if (!pendingCommands.has(message.id)) return;
     const { resolve, reject } = pendingCommands.get(message.id);
     pendingCommands.delete(message.id);
     if (message.error) reject(new Error(JSON.stringify(message.error)));
@@ -394,7 +552,16 @@ function connectCdpSocket(version) {
     for (const { reject } of pendingCommands.values()) reject(new Error("CDP socket closed"));
     pendingCommands.clear();
   };
-  return { socket, ready, call: (method, params, sessionId) => cdpCall(socket, method, params, sessionId) };
+  return {
+    socket,
+    ready,
+    pendingCommands,
+    call: (method, params, sessionId) => cdpCall(socket, pendingCommands, nextIdRef, method, params, sessionId),
+    onEvent: (handler) => {
+      eventHandlers.add(handler);
+      return () => eventHandlers.delete(handler);
+    },
+  };
 }
 
 async function connectCdpBrowser(version) {
@@ -452,13 +619,13 @@ async function removeCdpProfile(browser) {
   emitProgress("chrome-cleanup", "临时 Chrome profile 清理失败，请检查输出目录", { current: 0 });
 }
 
-async function withCdpBrowser(owner, worker) {
+async function withCdpBrowser(owner, worker, localProxy = proxyUrl) {
   const label = String(owner?.index ?? owner?.name ?? "session").replace(/[^a-zA-Z0-9_-]/g, "-");
   const profileDir = path.join(chromeProfileRoot, `${batchId}-${label}-${process.pid}-${crypto.randomBytes(4).toString("hex")}`);
   let browser;
   let cdp;
   try {
-    browser = await startCdpBrowser(profileDir);
+    browser = await startCdpBrowser(profileDir, localProxy);
     cdp = await connectCdpBrowser(browser.version);
     return await worker(cdp, browser);
   } finally {
@@ -513,8 +680,9 @@ async function createAccountContext(cdp, task) {
       deviceScaleFactor: 1,
       mobile: false,
     }, sessionId);
-    await cdp.call("Page.navigate", { url: task.prewarmUrl || prewarmUrl(task.userCode, task.loginRedirect) }, sessionId);
+    const navigateResult = await cdp.call("Page.navigate", { url: task.prewarmUrl || prewarmUrl(task.userCode, task.loginRedirect) }, sessionId);
     let captchaPageReady = false;
+    let lastPageState = null;
     for (let attempt = 0; attempt < captchaReadyAttempts; attempt += 1) {
       const pageStateText = await evaluate(cdp, sessionId, `(function () {
         try {
@@ -529,13 +697,18 @@ async function createAccountContext(cdp, task) {
         }
       })()`);
       const pageState = JSON.parse(pageStateText || "{}");
-      if (pageState.grecaptcha && pageState.ready === "complete" && pageState.host === captchaPrewarmHost) {
+      lastPageState = pageState;
+      if (pageState.grecaptcha && pageState.host === captchaPrewarmHost) {
         captchaPageReady = true;
         break;
       }
       await delay(500);
     }
-    if (!captchaPageReady) throw new Error("reCAPTCHA Enterprise did not become ready");
+    if (!captchaPageReady) {
+      const state = lastPageState || {};
+      const navError = navigateResult?.errorText ? ` nav=${navigateResult.errorText}` : "";
+      throw new Error(`reCAPTCHA Enterprise did not become ready (href=${state.href || "?"} host=${state.host || "?"} ready=${state.ready || "?"} grecaptcha=${state.grecaptcha}${navError})`);
+    }
     const ticket = await evaluate(cdp, sessionId, `(async () => {
       await new Promise((resolve) => window.grecaptcha.enterprise.ready(resolve));
       return await window.grecaptcha.enterprise.execute("${siteKey}", { action: "${captchaAction}" });
@@ -622,13 +795,18 @@ function taskEnv(task) {
     PASSWORD: task.password,
     LOGIN_REDIRECT: task.loginRedirect,
     CAPTCHA_ACTION: captchaAction,
+    MAIL_MODE: useHotmail ? "hotmail" : "imap",
     IMAP_USER: imapUser,
     IMAP_PASSWORD: imapPassword,
     MAIL_TO: task.email,
     MAIL_SINCE_SECONDS: "600",
     POLL_TIMEOUT_MS: "180000",
     IMAP_TIMEOUT_MS: "120000",
-    MINIMAX_PROXY_URL: proxyUrl,
+    MINIMAX_PROXY_URL: task.proxyUrl || proxyUrl,
+    HOTMAIL_POOL_PATH: hotmailPoolPath,
+    HOTMAIL_ACCOUNT_PATH: task.hotmailAccountPath || "",
+    HOTMAIL_EMAIL: task.email,
+    HOTMAIL_USED_BY: task.userCode || task.signInId || "",
   };
 }
 
@@ -667,20 +845,96 @@ async function providerUsers(beforeUsers = []) {
   return { providers, users: currentUsers, newUsers: currentUsers.filter((candidate) => !beforeUsers.includes(candidate)) };
 }
 
+const claimedPanelUsers = new Set();
+
 async function waitForProviderUser(task, beforeUsers) {
   const deadline = Date.now() + signInPollSeconds * 1000;
   let latest = null;
   while (Date.now() < deadline) {
     latest = await pollSignIn(task);
     const providerState = await providerUsers(beforeUsers);
-    const user = latest?.user || providerState.newUsers[0];
-    if ((latest?.state === "done" && user) || (user && providerState.users.includes(user))) {
+    const user = latest?.user || "";
+    if (latest?.state === "done" && user) {
+      if (claimedPanelUsers.has(user)) {
+        throw new Error(`panel user ${user} already bound by another worker`);
+      }
+      claimedPanelUsers.add(user);
       return { signIn: latest, providers: providerState.providers, user };
     }
     if (["failed", "error"].includes(latest?.state)) break;
     await delay(2000);
   }
   return { signIn: latest, providers: null, user: null };
+}
+
+async function claimHealthyHotmailAccount(usedBy) {
+  const maxAttempts = Math.max(1, Number(process.env.HOTMAIL_CLAIM_RETRY || 500));
+  const budgetMs = Math.max(60000, Number(process.env.HOTMAIL_CLAIM_BUDGET_MS || 900000));
+  const startedAt = Date.now();
+  let lastError = "";
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (Date.now() - startedAt > budgetMs) break;
+    let claimed;
+    try {
+      claimed = await runNodeScript(hotmailClient, {
+        ...process.env,
+        HOTMAIL_COMMAND: "claim",
+        HOTMAIL_POOL_PATH: hotmailPoolPath,
+        HOTMAIL_USED_BY: usedBy,
+        HOTMAIL_CLAIM_MARK: "reserved",
+        BATCH_ROOT: batchRoot,
+      }, 30000);
+    } catch (error) {
+      if (/池已用尽|账号池已用尽|no available/i.test(error.message || "")) {
+        const exhausted = new Error("Hotmail 邮箱池已用尽");
+        exhausted.poolExhausted = true;
+        throw exhausted;
+      }
+      throw error;
+    }
+    const hotmailAccount = claimed.account;
+    const hotmailAccountPath = claimed.accountPath;
+    try {
+      await runNodeScript(hotmailClient, {
+        ...process.env,
+        HOTMAIL_COMMAND: "test",
+        HOTMAIL_POOL_PATH: hotmailPoolPath,
+        HOTMAIL_ACCOUNT_PATH: hotmailAccountPath,
+        HOTMAIL_EMAIL: hotmailAccount.email,
+        BATCH_ROOT: batchRoot,
+      }, 45000);
+      console.error(JSON.stringify({
+        type: "hotmail-pool",
+        action: "claim-ok",
+        email: hotmailAccount.email,
+        message: `已领取可用邮箱 ${hotmailAccount.email}`,
+        at: new Date().toISOString(),
+      }));
+      return { hotmailAccount, hotmailAccountPath, email: hotmailAccount.email };
+    } catch (error) {
+      lastError = error.message || String(error);
+      const hard = /AADSTS70000|AADSTS50173|AADSTS700082|AADSTS50034|invalid_grant|grant is expired|微软令牌刷新失败|user could not be authenticated|interaction_required/i.test(lastError);
+      await runNodeScript(hotmailClient, {
+        ...process.env,
+        HOTMAIL_COMMAND: hard ? "mark-error" : "release",
+        HOTMAIL_POOL_PATH: hotmailPoolPath,
+        HOTMAIL_EMAIL: hotmailAccount.email,
+        HOTMAIL_USED_BY: usedBy,
+        HOTMAIL_ERROR: lastError,
+        BATCH_ROOT: batchRoot,
+      }, 30000).catch(() => {});
+      console.error(JSON.stringify({
+        type: "hotmail-pool",
+        action: hard ? "claim-skip" : "claim-retry",
+        email: hotmailAccount.email,
+        message: hard ? `邮箱令牌失效，已跳过 ${hotmailAccount.email}` : `邮箱暂不可用，已放回并重试 ${hotmailAccount.email}`,
+        at: new Date().toISOString(),
+      }));
+    }
+  }
+  const exhausted = new Error(`连续 ${maxAttempts} 次或 ${Math.round(budgetMs / 60000)} 分钟内未能领取可用 Hotmail 账号：${lastError || "unknown"}`);
+  exhausted.poolExhausted = true;
+  throw exhausted;
 }
 
 async function createTask(index) {
@@ -691,7 +945,14 @@ async function createTask(index) {
     });
     const signInUrl = new URL(signIn.url);
     const loginRedirect = `${signInUrl.pathname}${signInUrl.search}`;
-    const email = `${mailPrefix}${crypto.randomBytes(5).toString("hex")}@${mailDomain}`;
+    let hotmailAccount = null;
+    let hotmailAccountPath = "";
+    let email = "";
+    if (useHotmail) {
+      ({ hotmailAccount, hotmailAccountPath, email } = await claimHealthyHotmailAccount(signIn.code || signIn.id || `account-${index}`));
+    } else {
+      email = `${mailPrefix}${crypto.randomBytes(5).toString("hex")}@${mailDomain}`;
+    }
     const password = `Mm!${crypto.randomBytes(12).toString("base64url")}`;
     const runDir = path.join(root, `account-${String(index).padStart(3, "0")}`);
     return {
@@ -702,6 +963,8 @@ async function createTask(index) {
       loginRedirect,
       email,
       password,
+      hotmailAccount,
+      hotmailAccountPath,
       runDir,
       signInPath: path.join(runDir, "signin.json"),
       configPath: path.join(runDir, "run-config.json"),
@@ -718,7 +981,95 @@ async function initializeTask(task) {
   await fs.mkdir(task.runDir, { recursive: true });
   await fs.rm(task.statePath, { force: true });
   await writeJson(task.signInPath, task.signIn);
-  await writeJson(task.configPath, { userCode: task.userCode, email: task.email, password: task.password, loginRedirect: task.loginRedirect, createdAt: new Date().toISOString() });
+  await writeJson(task.configPath, {
+    userCode: task.userCode,
+    email: task.email,
+    password: task.password,
+    loginRedirect: task.loginRedirect,
+    mailMode: useHotmail ? "hotmail" : "imap",
+    hotmailAccountPath: task.hotmailAccountPath || "",
+    createdAt: new Date().toISOString(),
+  });
+  if (task.hotmailAccount) {
+    await writeJson(path.join(task.runDir, "hotmail-account.json"), {
+      email: task.hotmailAccount.email,
+      clientId: task.hotmailAccount.clientId,
+      status: task.hotmailAccount.status,
+      accountPath: task.hotmailAccountPath,
+    });
+  }
+}
+
+function classifyHotmailPoolAction(result) {
+  if (result?.ok) return "mark-used";
+  const error = String(result?.error || "");
+  // Hard mailbox / Graph token failures: permanently skip until a fresh token is imported.
+  if (/AADSTS70000|AADSTS50173|AADSTS700082|AADSTS50034|invalid_grant|grant is expired|微软令牌刷新失败|user could not be authenticated|mailbox.*(not found|does not exist)|account.*(disabled|locked)|interaction_required/i.test(error)) {
+    return "mark-error";
+  }
+  // MiniMax already consumed this mailbox; do not recycle it.
+  if (/already registered|邮箱已|account already exists|check-account returned 12000/i.test(error)) {
+    return "mark-error";
+  }
+  // Captcha / human-verification failures: skip this mailbox immediately and move on.
+  // Do not release it back to the front of the pool, or the same email will be retried forever.
+  if (/1200063|人机验证未通过|Verification failed, please try again|Authorization is not pending|Authorization was not approved|Authorization status|login_required/i.test(error)) {
+    return "mark-skipped";
+  }
+  // Reconciliation after restarts: do not burn mailboxes just because the process was killed
+  // before result.json was written; the mailbox and Graph token remain reusable.
+  if (/interrupted before result was saved|registration failed before result was saved/i.test(error)) {
+    return "release";
+  }
+  // Global rate-limit: keep the mailbox, but the caller should cool down before claiming another one.
+  if (/requests are too frequent|status_code\D*32\b|send-code:\s*32\b/i.test(error)) {
+    return "release";
+  }
+  // Soft / temporary / MiniMax-side failures: keep the Graph token for later reuse.
+  return "release";
+}
+
+async function finalizeHotmailAccount(task, result) {
+  if (!useHotmail || !task?.email) return;
+  const command = classifyHotmailPoolAction(result);
+  try {
+    await runNodeScript(hotmailClient, {
+      ...process.env,
+      HOTMAIL_COMMAND: command,
+      HOTMAIL_POOL_PATH: hotmailPoolPath,
+      HOTMAIL_EMAIL: task.email,
+      HOTMAIL_USED_BY: task.userCode || task.signInId || "",
+      HOTMAIL_ERROR: result?.ok ? "" : (result?.error || "registration failed"),
+      BATCH_ROOT: batchRoot,
+    }, 30000);
+    if (command === "release") {
+      console.error(JSON.stringify({
+        type: "hotmail-pool",
+        action: "release",
+        email: task.email,
+        message: "失败但令牌仍可用，已放回账号池待复用",
+        at: new Date().toISOString(),
+      }));
+    } else if (command === "mark-skipped") {
+      console.error(JSON.stringify({
+        type: "hotmail-pool",
+        action: "mark-skipped",
+        email: task.email,
+        message: "注册授权失败，已跳过该邮箱并换下一个",
+        at: new Date().toISOString(),
+      }));
+    } else if (command === "mark-error") {
+      console.error(JSON.stringify({
+        type: "hotmail-pool",
+        action: "mark-error",
+        email: task.email,
+        message: "邮箱令牌失效或账号不可用，已跳过",
+        at: new Date().toISOString(),
+      }));
+    }
+  } catch {
+    // Keep registration result even if pool bookkeeping fails.
+  }
 }
 
 async function processAccount(task, beforeUsers, progressHandler) {
@@ -749,6 +1100,7 @@ async function processAccount(task, beforeUsers, progressHandler) {
       completedAt: new Date().toISOString(),
     };
     await writeJson(task.resultPath, result);
+    await finalizeHotmailAccount(task, result);
     return { index: task.index, ok: true, user: result.user, email: result.email, runDir: task.runDir, startedAt };
   } catch (error) {
     const result = {
@@ -763,6 +1115,7 @@ async function processAccount(task, beforeUsers, progressHandler) {
       completedAt: new Date().toISOString(),
     };
     await writeJson(task.resultPath, result);
+    await finalizeHotmailAccount(task, result);
     return { index: task.index, ok: false, error: error.message, runDir: task.runDir, startedAt };
   }
 }
@@ -844,62 +1197,170 @@ async function main() {
     await runDryRun();
     return;
   }
-  if (!panelKey || !imapUser || !imapPassword) throw new Error("PANEL_KEY, IMAP_USER and IMAP_PASSWORD are required");
+  if (!panelKey) throw new Error("PANEL_KEY is required");
+  if (useHotmail) {
+    if (!(await pathExists(hotmailClient))) throw new Error("scripts/hotmail-graph.mjs is required for MAIL_MODE=hotmail");
+    if (!(await pathExists(hotmailPoolPath))) throw new Error(`Hotmail pool not found: ${hotmailPoolPath}`);
+  } else if (!imapUser || !imapPassword) {
+    throw new Error("PANEL_KEY, IMAP_USER and IMAP_PASSWORD are required");
+  }
   await fs.mkdir(root, { recursive: true });
   await fs.mkdir(chromeProfileRoot, { recursive: true });
   await panelFetch(`/?k=${encodeURIComponent(panelKey)}&view=providers&edit=minimax-code-global`, {}, false);
+  if (useHotmail) {
+    const repaired = await reconcileIncompleteAccounts();
+    if (repaired.repaired) {
+      emitProgress("resume", `已修复 ${repaired.repaired} 个中断账号的邮箱池记账`);
+    }
+  }
   const existing = await loadExistingResults();
   const results = existing.results;
   let nextIndex = existing.nextIndex;
   updateProgressState(results, nextIndex);
   await writeSummary(results);
   emitProgress("resume", `已恢复 ${progressState.succeeded}/${targetSuccessCount} 个成功账号，正在继续补齐`);
-  while (progressState.succeeded < targetSuccessCount) {
-      progressState.current = nextIndex;
-      emitProgress("creating-code", `正在创建第 ${nextIndex} 个账号设备码`, { current: nextIndex });
-      const task = await createTask(nextIndex);
+  emitProgress("workers", `注册并行 ${workers} 路启动`);
+  let nextIndexGate = Promise.resolve();
+  async function reserveNextIndex() {
+    let assigned = 0;
+    const waiter = nextIndexGate.then(() => {
+      assigned = nextIndex;
       nextIndex += 1;
+      progressState.current = assigned;
+      return assigned;
+    });
+    nextIndexGate = waiter.then(() => {}, () => {});
+    return waiter;
+  }
+
+  async function runOneAccount() {
+    const index = await reserveNextIndex();
+    let bridge = { proxyUrl, cleanup: async () => {} };
+    let task;
+    let result;
+    try {
+      bridge = await createStickyProxyBridge(index);
+      emitProgress("proxy-rotate", `已分配独立代理会话：准备第 ${index} 个账号`, { current: index, workers });
+      emitProgress("creating-code", `正在创建第 ${index} 个账号设备码`, { current: index, workers });
+      task = await createTask(index);
+      task.proxyUrl = bridge.proxyUrl;
       await initializeTask(task);
       const beforeUsers = (await providerUsers()).users;
-      emitProgress("captcha", `正在为 ${task.email} 创建独立临时 Chrome profile 并预热 reCAPTCHA 票据`, { current: task.index });
-      let result;
-      try {
-        await withCdpBrowser(task, async (cdp, browser) => {
-          task.browserProfileDir = browser.profileDir;
-          task.browserCdpPort = browser.port;
-          task.browserChromePid = browser.child.pid;
-          task.context = await createAccountContext(cdp, task);
-          result = await processAccount(task, beforeUsers, (step, message) => emitProgress(step, message, { current: task.index }));
-          await closeBrowserContext(cdp, task.context);
-        });
-      } catch (error) {
-        if (!result) {
-          task.prewarmError = error.message;
-          result = {
-            index: task.index,
-            ok: false,
-            error: task.prewarmError,
-            runDir: task.runDir,
-          };
-          if (!captchaUnavailablePattern.test(task.prewarmError)) {
-            await writeJson(task.resultPath, { ok: false, error: task.prewarmError, email: task.email, userCode: task.userCode, signInId: task.signInId, runDir: task.runDir, completedAt: new Date().toISOString() });
+      emitProgress("captcha", `正在为 ${task.email} 创建独立临时 Chrome profile 并预热 reCAPTCHA 票据`, { current: task.index, workers });
+      const maxExitRetries = Math.max(1, Number(process.env.CAPTCHA_EXIT_RETRY || 6));
+      for (let exitAttempt = 1; ; exitAttempt += 1) {
+        try {
+          await withCdpBrowser(task, async (cdp, browser) => {
+            task.browserProfileDir = browser.profileDir;
+            task.browserCdpPort = browser.port;
+            task.browserChromePid = browser.child.pid;
+            task.context = await createAccountContext(cdp, task);
+            result = await processAccount(task, beforeUsers, (step, message) => emitProgress(step, message, { current: task.index, workers }));
+            await closeBrowserContext(cdp, task.context);
+          }, bridge.proxyUrl);
+          break;
+        } catch (error) {
+          const message = String(error?.message || "");
+          const retryableExit = !result && /did not become ready|returned no ticket|CDP .*timed out|net::ERR|ERR_PROXY|ERR_TUNNEL|ERR_CONNECTION/i.test(message);
+          if (retryableExit && exitAttempt < maxExitRetries) {
+            emitProgress("captcha-retry-ip", `验证码环境异常，切换出口 IP 重试 ${exitAttempt}/${maxExitRetries}`, { current: task.index, workers });
+            await bridge.cleanup().catch(() => {});
+            bridge = await createStickyProxyBridge(`${index}-r${exitAttempt}`);
+            task.proxyUrl = bridge.proxyUrl;
+            continue;
           }
+          if (!result) {
+            task.prewarmError = message;
+            result = {
+              index: task.index,
+              ok: false,
+              error: task.prewarmError,
+              runDir: task.runDir,
+            };
+            await writeJson(task.resultPath, {
+              ok: false,
+              error: task.prewarmError,
+              email: task.email,
+              userCode: task.userCode,
+              signInId: task.signInId,
+              runDir: task.runDir,
+              completedAt: new Date().toISOString(),
+            });
+            await finalizeHotmailAccount(task, { ...result, email: task.email, userCode: task.userCode, signInId: task.signInId });
+          }
+          break;
         }
       }
-      results.push(result);
-      updateProgressState(results, nextIndex);
-      await writeSummary(results);
+      await enqueueState(async () => {
+        results.push(result);
+        updateProgressState(results, nextIndex);
+        await writeSummary(results);
+      });
       emitAccountResult(result);
       if (captchaUnavailablePattern.test(result.error || "")) {
-        emitProgress("captcha-retry", "本轮 reCAPTCHA 票据环境异常，守护进程将自动恢复", { current: task.index });
-        process.exitCode = 1;
-        return;
+        captchaFailureStreak += 1;
+        const streakLimit = Math.max(2, Number(process.env.CAPTCHA_STREAK_LIMIT || (workers > 1 ? 6 : 2)));
+        if (captchaFailureStreak >= streakLimit) {
+          emitProgress("captcha-retry", `连续 ${captchaFailureStreak} 个账号验证码异常，本轮重启恢复`, { current: task.index, workers });
+          process.exitCode = 1;
+          throw new Error(result.error || "reCAPTCHA Enterprise did not become ready");
+        }
+        emitProgress("captcha-skip", `验证码环境异常，跳过本账号继续下一个（连续 ${captchaFailureStreak}/${streakLimit}）`, { current: task.index, workers });
+      } else {
+        captchaFailureStreak = 0;
       }
-      emitProgress("account-done", result.ok ? `账号注册成功：${result.user || result.email}` : `账号未成功：${result.error || "未知错误"}`, { current: task.index });
+      emitProgress("account-done", result.ok ? `账号注册成功：${result.user || result.email}` : `账号未成功：${result.error || "未知错误"}`, { current: task.index, workers });
+      if (!result.ok) {
+        const waitMs = failureBackoffMs(result.error || "");
+        if (waitMs > 0) {
+          emitProgress("backoff", `失败后冷却 ${Math.round(waitMs / 1000)} 秒再继续，避免触发限流/人机风控`, { current: task.index, workers });
+          await delay(waitMs);
+        }
+      } else {
+        const gapMs = Math.max(0, Number(process.env.MINIMAX_ACCOUNT_GAP_MS || 1500));
+        if (gapMs > 0) await delay(gapMs);
+      }
+    } finally {
+      try { await bridge.cleanup(); } catch {}
+    }
+  }
+
+  const active = new Set();
+  let fatal = null;
+  let poolExhausted = false;
+  let captchaFailureStreak = 0;
+  while (!fatal && !poolExhausted && progressState.succeeded < targetSuccessCount) {
+    while (!fatal && !poolExhausted && progressState.succeeded + active.size < targetSuccessCount && active.size < workers) {
+      const job = runOneAccount()
+        .catch((error) => {
+          if (error?.poolExhausted) {
+            poolExhausted = true;
+            return;
+          }
+          fatal = error;
+          process.exitCode = 1;
+        })
+        .finally(() => active.delete(job));
+      active.add(job);
+    }
+    if (!active.size || poolExhausted) break;
+    await Promise.race(active);
+  }
+  if (active.size) await Promise.allSettled([...active]);
+  if (fatal) throw fatal;
+  if (poolExhausted) {
+    await writeJson(path.join(batchRoot, "pool-exhausted.json"), {
+      batchId,
+      at: new Date().toISOString(),
+      succeeded: progressState.succeeded,
+      failed: progressState.failed,
+    });
+    emitProgress("pool-exhausted", `邮箱池已用尽，本批次收尾：成功 ${progressState.succeeded} 个`);
   }
   const summary = await writeSummary(results, true);
   console.log(JSON.stringify({ type: "summary", summary, summaryPath }));
 }
+
 
 main().catch((error) => {
   process.exitCode = 1;

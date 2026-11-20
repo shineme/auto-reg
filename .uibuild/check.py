@@ -1,0 +1,13 @@
+import io, re
+h = io.open(r'C:\Users\dhl\Desktop\m3\go-protocol\frontend\index.html', encoding='utf-8').read()
+ids = re.findall(r'id="([^"]+)"', h)
+idset = set(ids)
+used = set(re.findall(r'\$\("([^"]+)"\)', h))
+print('missing ids:', sorted(used - idset))
+fields = re.search(r'const fields = \[(.*?)\];', h, re.S).group(1)
+fids = set(re.findall(r'"([^"]+)"', fields))
+print('fields missing in DOM:', sorted(fids - idset))
+dups = sorted({i for i in idset if ids.count(i) > 1})
+print('duplicate ids:', dups)
+print('renderPoolStats occurrences:', h.count('renderPoolStats'))
+print('renderMailPoolStats:', h.count('renderMailPoolStats'), 'renderNodePoolStats:', h.count('renderNodePoolStats'))

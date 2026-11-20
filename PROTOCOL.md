@@ -176,3 +176,39 @@ node .\scripts\minimax-fast-batch.mjs
 - 配置了上游代理时，本地代理桥会设置 `NODE_USE_ENV_PROXY=1`、`HTTP(S)_PROXY`、`ALL_PROXY` 和 `MINIMAX_PROXY_URL`，让 Node 面板请求、MiniMax 协议请求与 CDP Chrome 共用同一出口；`NO_PROXY` 保留 `localhost/127.0.0.1/::1`，避免本机 CDP 控制请求也被代理。代理留空时禁用 Node 环境代理，Chrome 也不附加 `--proxy-server`。
 - GUI 接受 `socks5://user:pass@host:port`、`http://user:pass@host:port`、缺少 `@` 的 `scheme://user:pass:host:port`，以及 Markdown 转义后的 `http\://...`；规范化后统一转成本地 HTTP CONNECT 桥。
 - 遇到 `1200063` 时只记录本次尝试失败；检查票据 action、设备码时效、会话状态和出口一致性后按间隔换新账号继续，不要把它误判为域名风控。不要伪造票据、复用跨账号票据或规避风控。票据环境不可用时也立即停止并检查出口或代理；恢复失败时联系供应商或使用授权 API/测试环境。
+
+
+## Cursor 授权流程（面板 provider = cursor）
+
+面板 `POST /api/plugin-signin {"provider":"cursor","method":0,"inputs":{},"proxy":""}` 返回
+`{"id":"<SIGNIN_ID>","url":"https://cursor.com/loginDeepControl?challenge=..&uuid=..&mode=login&redirectTarget=cli","state":"waiting"}`，
+面板随后轮询 `GET /api/signin/<SIGNIN_ID>`，浏览器完成登录后该记录变成 `done` 并带上面板账号。
+
+浏览器侧（CDP 驱动真实 Chrome，`go-protocol/cursor*.go`）：
+
+1. 打开 `signIn.url` -> 点 `Continue to sign in` -> 跳 `authenticator.cursor.sh`。
+2. 邮箱页填邮箱并提交 -> 密码页切到 `button[value="magic-code"]`（邮箱取码登录）。
+3. `POST /me/messages` (Graph) 取标题含 Cursor 的 6 位验证码 -> 写入 `input[name=code]` -> 回车提交。
+4. 授权确认页 `Sign in to Cursor CLI` -> 点 `Sign in`（真实鼠标事件，跳过 Cookie 同意框）。
+5. Cursor CLI 会再发一封 `Confirm a change to your Cursor account` 邮件，信里的
+   `https://cursor.com/confirm-action#t=<TOKEN>` 必须在**同一个浏览器**里打开（新标签页），
+   并点页面上的 `Confirm`。
+6. 面板 `/api/signin/<SIGNIN_ID>` 变 `done` -> 读 `/api/providers` 里 cursor 的 `account.logins` 校验落库。
+
+要点：
+
+- 取码与取确认链接用不同的邮件过滤：`kind=cursor` 排除 `Confirm a change` 邮件（避免把确认信里的数字当验证码），
+  `kind=cursor-confirm` 只认 `Confirm a change` 邮件；确认链接要读 Graph 的原始 HTML 正文（`body.content`），
+  清洗后的正文会把 `href` 去掉。
+- 人机验证（Cloudflare Turnstile）不自动绕过：程序把 Chrome 窗口摆到屏幕左上角并置前，
+  由用户点一次 "I'm human"，之后流程自动继续。
+- 每次运行用独立的 Chrome profile 目录，结束即删；面板与协议请求共用同一出口 IP。
+- 界面语言可能是中文，人机验证提示要同时认 `确认您是真人 / 验证您是人类 / 人机验证` 等中文文案。
+- OneTrust 的 Cookie 同意框和全屏遮罩（`.onetrust-pc-dark-filter`）会挡住按钮的坐标判定，
+  取坐标前先把这些遮罩设为 `display:none`，否则真实鼠标点击会落在遮罩上。
+- 授权确认页上的 `Sign in` 会被一次性引导清单（`Connect your repos to finish setup` /
+  `Build cloud-based code automations`）盖住：先点 `Maybe later` 关掉引导，再点 `Sign in`。
+- 浏览器对 `cursor.com` 不走本地代理桥（上游会拒 CONNECT），面板与 Graph 取信仍走上游代理；
+  用 `MINIMAX_CURSOR_DIRECT=1` 控制。
+- 批量入口：CLI `-cursor-batch -cursor-count N`，GUI「绑定 Cursor 账号」按钮；
+  号池用 `outputDir/cursor-test/pool.json` 副本，不污染主号池。

@@ -1,11 +1,12 @@
 # MiniMax 协议注册工作台
 
-Go + Wails v2 桌面程序，用于配置 magpie 面板、域名邮箱、IMAP 接码邮箱、HTTP/SOCKS5 代理和批量注册参数，并驱动 `scripts/minimax-fast-batch.mjs` 完成协议级注册与绑定。
+Go + Wails v2 桌面程序，用于配置 magpie 面板、域名邮箱 / Hotmail Graph 接码、HTTP/SOCKS5 代理和批量注册参数，并驱动 `scripts/minimax-fast-batch.mjs` 完成协议级注册与绑定。
 
 ## 功能
 
 - 配置面板地址、面板密钥、邮箱域名和前缀。
 - 配置收件邮箱、IMAP 主机/端口/登录名/授权码。
+- 也可切换到 Hotmail Graph 模式：导入 `email----password----clientId----refreshToken`，先测试收信，再用于批量注册。
 - 支持 `socks5://user:pass@host:port`、`http://user:pass@host:port`、省略 `@` 的 `socks5://user:pass:host:port` 和转义后的 `http\://...`。
 - 自动把 SOCKS5 或带认证的 HTTP 上游代理桥接成本地 HTTP CONNECT 代理，供 Node 协议脚本和 Chrome 共用同一出口。
 - 配置批量数量、Chrome 路径、协议脚本目录和输出目录；CDP 端口由每个临时浏览器自动分配。
@@ -29,8 +30,10 @@ Go + Wails v2 桌面程序，用于配置 magpie 面板、域名邮箱、IMAP �
 - Node.js 24+。
 - Google Chrome。
 - 仓库根目录的 `scripts/minimax-fast-batch.mjs`、`scripts/minimax-flow.mjs`、`scripts/minimax-protocol-client.mjs`、`scripts/imap.mjs` 等协议脚本。
+- 仓库根目录的 `scripts/hotmail-graph.mjs`，用于 Hotmail / Outlook Graph 导入、账号池和验证码轮询。
 - 仓库根目录的 `scripts/minimax-supervisor.mjs`，用于断点续跑和自动恢复。
 - 可用的 magpie 面板密钥、域名邮箱 catch-all、IMAP 授权码和出口代理。
+- 或者一批可用的 Hotmail / Outlook Graph 账号。
 
 ## 开发运行
 

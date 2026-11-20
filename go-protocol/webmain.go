@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -47,6 +48,7 @@ func buildBridge(token string) string {
     GetConfig: function () { return api("GetConfig"); },
     SaveConfig: function (c) { return api("SaveConfig", [c]); },
     GetProgress: function () { return api("GetProgress"); },
+    GetProgressLite: function () { return api("GetProgressLite"); },
     TestPanel: function (c) { return api("TestPanel", [c]); },
     ImportHotmail: function (c) { return api("ImportHotmail", [c]); },
     ImportHotmailFile: function (c, p) { return api("ImportHotmailFile", [c, p]); },
@@ -62,6 +64,8 @@ func buildBridge(token string) string {
     MailInboxView: function (c, e) { return api("MailInboxView", [c, e]); },
     MailMessageView: function (c, e, m) { return api("MailMessageView", [c, e, m]); },
     MailListOptions: function (c) { return api("MailListOptions", [c]); },
+    SearchMailboxes: function (c, q, l) { return api("SearchMailboxes", [c, q, l]); },
+    GetResultsPage: function (c, o, l, q, s) { return api("GetResultsPage", [c, o, l, q, s]); },
     StartBatch: function (c) { return api("StartBatch", [c]); },
     StopBatch: function () { return api("StopBatch"); },
     ClearHistory: function (c) { return api("ClearHistory", [c]); },
@@ -78,6 +82,7 @@ func buildBridge(token string) string {
 func main() {
 	addr := flag.String("addr", "0.0.0.0:8090", "listen address")
 	token := flag.String("token", "", "access token (empty = open)")
+	autoStart := flag.Bool("autostart", false, "auto resume the supervised batch on startup using the saved config")
 	flag.Parse()
 
 	app := NewApp()
@@ -90,6 +95,22 @@ func main() {
 
 	ws := NewWebServer(app, *token)
 	handler := withFrontend(ws, page)
+
+	if *autoStart {
+		go func() {
+			time.Sleep(3 * time.Second)
+			cfg, err := app.GetConfig()
+			if err != nil {
+				log.Printf("[autostart] 读取配置失败: %v", err)
+				return
+			}
+			if err := app.StartSupervised(cfg); err != nil {
+				log.Printf("[autostart] 自动续跑失败: %v", err)
+				return
+			}
+			log.Printf("[autostart] 已按保存的配置自动续跑（目标 %d，%d 路）", cfg.Count, cfg.Workers)
+		}()
+	}
 
 	log.Printf("MiniMax web service on http://%s (token: %s)", *addr, tokenState(*token))
 	if err := http.ListenAndServe(*addr, handler); err != nil {
@@ -112,6 +133,8 @@ func withFrontend(ws *WebServer, page string) http.Handler {
 			inner.ServeHTTP(w, r)
 		case r.URL.Path == "/events":
 			inner.ServeHTTP(w, r)
+		case strings.HasPrefix(r.URL.Path, "/assets/"):
+			serveAsset(w, r)
 		case r.URL.Path == "/" || r.URL.Path == "/index.html":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write([]byte(page))
@@ -119,6 +142,28 @@ func withFrontend(ws *WebServer, page string) http.Handler {
 			http.NotFound(w, r)
 		}
 	})
+}
+
+// serveAsset 伺服内嵌的 frontend/assets 静态资源（CSS/JS）。
+func serveAsset(w http.ResponseWriter, r *http.Request) {
+	name := "frontend/" + strings.TrimPrefix(r.URL.Path, "/")
+	if strings.Contains(name, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := webAssets.ReadFile(name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	switch {
+	case strings.HasSuffix(name, ".css"):
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	case strings.HasSuffix(name, ".js"):
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	}
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	_, _ = w.Write(data)
 }
 
 var _ = websocket.Upgrader{}

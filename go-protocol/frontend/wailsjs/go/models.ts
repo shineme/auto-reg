@@ -268,6 +268,52 @@ export namespace main {
 	        this.bodyText = source["bodyText"];
 	    }
 	}
+	export class MailboxOption {
+	    email: string;
+	    status: string;
+	    note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MailboxOption(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.email = source["email"];
+	        this.status = source["status"];
+	        this.note = source["note"];
+	    }
+	}
+	export class ProgressLite {
+	    target: number;
+	    succeeded: number;
+	    failedAttempts: number;
+	    currentStage: string;
+	    currentEmail: string;
+	    running: boolean;
+	    updatedAt: string;
+	    points: number;
+	    firstAt: string;
+	    lastAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProgressLite(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.target = source["target"];
+	        this.succeeded = source["succeeded"];
+	        this.failedAttempts = source["failedAttempts"];
+	        this.currentStage = source["currentStage"];
+	        this.currentEmail = source["currentEmail"];
+	        this.running = source["running"];
+	        this.updatedAt = source["updatedAt"];
+	        this.points = source["points"];
+	        this.firstAt = source["firstAt"];
+	        this.lastAt = source["lastAt"];
+	    }
+	}
 	export class ProxyPoolStats {
 	    total: number;
 	    alive: number;
@@ -285,6 +331,42 @@ export namespace main {
 	        this.dead = source["dead"];
 	        this.checked = source["checked"];
 	    }
+	}
+	export class ResultsPage {
+	    total: number;
+	    offset: number;
+	    limit: number;
+	    rows: AccountResult[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ResultsPage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total = source["total"];
+	        this.offset = source["offset"];
+	        this.limit = source["limit"];
+	        this.rows = this.convertValues(source["rows"], AccountResult);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

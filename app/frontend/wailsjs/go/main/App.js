@@ -14,6 +14,10 @@ export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
 
+export function GetHotmailPoolStatus(arg1) {
+  return window['go']['main']['App']['GetHotmailPoolStatus'](arg1);
+}
+
 export function GetLatestResults() {
   return window['go']['main']['App']['GetLatestResults']();
 }
@@ -26,12 +30,28 @@ export function GetRunStatus() {
   return window['go']['main']['App']['GetRunStatus']();
 }
 
+export function ImportHotmailAccounts(arg1, arg2) {
+  return window['go']['main']['App']['ImportHotmailAccounts'](arg1, arg2);
+}
+
+export function KeepValidHotmailAccounts(arg1) {
+  return window['go']['main']['App']['KeepValidHotmailAccounts'](arg1);
+}
+
 export function NormalizeProxy(arg1) {
   return window['go']['main']['App']['NormalizeProxy'](arg1);
 }
 
 export function OpenOutputDir() {
   return window['go']['main']['App']['OpenOutputDir']();
+}
+
+export function PreflightHotmailAccounts(arg1, arg2) {
+  return window['go']['main']['App']['PreflightHotmailAccounts'](arg1, arg2);
+}
+
+export function PurgeInvalidHotmailAccounts(arg1) {
+  return window['go']['main']['App']['PurgeInvalidHotmailAccounts'](arg1);
 }
 
 export function SaveConfig(arg1) {
@@ -44,6 +64,10 @@ export function StartRun(arg1, arg2) {
 
 export function StopRun() {
   return window['go']['main']['App']['StopRun']();
+}
+
+export function TestHotmailAccounts(arg1, arg2) {
+  return window['go']['main']['App']['TestHotmailAccounts'](arg1, arg2);
 }
 
 export function TestPanel(arg1) {

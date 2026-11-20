@@ -8,10 +8,18 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"sync"
 	"time"
 
 	"golang.org/x/net/proxy"
+)
+
+var (
+	stickyProxyMu   sync.Mutex
+	stickyProxyUser string
+	stickyProxyAt   time.Time
 )
 
 func main() {
@@ -26,7 +34,7 @@ func main() {
 		os.Exit(1)
 	}
 	localProxy := fmt.Sprintf("http://127.0.0.1:%d", listener.Addr().(*net.TCPAddr).Port)
-	server := &http.Server{Handler: http.HandlerFunc(connectHandler(upstream)), ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Handler: bridgeHandler(upstream), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = server.Serve(listener) }()
 	if err := os.WriteFile(os.Args[2], []byte(localProxy), 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -36,6 +44,49 @@ func main() {
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	<-signals
 	_ = server.Close()
+}
+
+func rotatingProxyUser(username string) string {
+	base := strings.TrimSpace(username)
+	if base == "" {
+		return base
+	}
+	lower := strings.ToLower(base)
+	if strings.Contains(lower, "-session-") || strings.Contains(lower, "_session-") || strings.Contains(lower, "-sessid-") {
+		return base
+	}
+	stickyProxyMu.Lock()
+	defer stickyProxyMu.Unlock()
+	if stickyProxyUser == "" {
+		suffix := fmt.Sprintf("%d%d", time.Now().UnixNano(), time.Now().Unix()%997)
+		stickyProxyUser = base + "-session-" + suffix
+		stickyProxyAt = time.Now()
+	}
+	return stickyProxyUser
+}
+
+func rotateStickyProxyUser() {
+	stickyProxyMu.Lock()
+	defer stickyProxyMu.Unlock()
+	stickyProxyUser = ""
+	stickyProxyAt = time.Time{}
+}
+
+func bridgeHandler(upstream string) http.Handler {
+	connect := connectHandler(upstream)
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodConnect {
+			connect(writer, request)
+			return
+		}
+		if request.URL.Path == "/__rotate" {
+			rotateStickyProxyUser()
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"ok":true,"rotated":true}`))
+			return
+		}
+		http.Error(writer, "only CONNECT or /__rotate is supported", http.StatusMethodNotAllowed)
+	})
 }
 
 func connectHandler(upstream string) http.HandlerFunc {
@@ -50,18 +101,27 @@ func connectHandler(upstream string) http.HandlerFunc {
 			http.Error(writer, "only CONNECT is supported", http.StatusMethodNotAllowed)
 			return
 		}
-		auth := &proxy.Auth{User: parsed.User.Username()}
-		if password, ok := parsed.User.Password(); ok {
-			auth.Password = password
+		var target net.Conn
+		var dialErr error
+		for attempt := 0; attempt < 3; attempt += 1 {
+			auth := &proxy.Auth{User: rotatingProxyUser(parsed.User.Username())}
+			if password, ok := parsed.User.Password(); ok {
+				auth.Password = password
+			}
+			dialer, err := proxy.SOCKS5("tcp", parsed.Host, auth, &net.Dialer{Timeout: 8 * time.Second})
+			if err != nil {
+				dialErr = err
+				break
+			}
+			target, dialErr = dialer.Dial("tcp", request.Host)
+			if dialErr == nil {
+				break
+			}
+			rotateStickyProxyUser()
+			time.Sleep(250 * time.Millisecond)
 		}
-		dialer, err := proxy.SOCKS5("tcp", parsed.Host, auth, &net.Dialer{Timeout: 20 * time.Second})
-		if err != nil {
-			http.Error(writer, err.Error(), http.StatusBadGateway)
-			return
-		}
-		target, err := dialer.Dial("tcp", request.Host)
-		if err != nil {
-			http.Error(writer, err.Error(), http.StatusBadGateway)
+		if target == nil {
+			http.Error(writer, dialErr.Error(), http.StatusBadGateway)
 			return
 		}
 		hijacker, ok := writer.(http.Hijacker)

@@ -36,6 +36,7 @@ func RunSupervisedBatch(cfg Config, stopCh <-chan struct{}, onLog func(string)) 
 				onLog(fmt.Sprintf("[%s] [state] 成功 %d/%d，失败尝试 %d，阶段：%s",
 					time.Now().Format("15:04:05"), s.Succeeded, s.Target, s.FailedAttempts, s.CurrentStage))
 			},
+			nil,
 		)
 		if err := runner.Start(cfg); err != nil {
 			onLog(fmt.Sprintf("[supervised] 第 %d 轮启动失败: %v，60s 后重试", round, err))

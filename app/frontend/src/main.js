@@ -24,7 +24,7 @@ function readForm() {
   const data = new FormData(form);
   const config = {};
   for (const [key, value] of data.entries()) config[key] = value;
-  for (const key of ["imapPort", "count"]) config[key] = numberValue(key);
+  for (const key of ["imapPort", "count", "hotmailPreflightWorkers"]) config[key] = numberValue(key);
   return config;
 }
 
@@ -34,11 +34,35 @@ function fillForm(config) {
     const input = form.elements[key];
     if (input) input.value = value ?? "";
   }
+  updateMailMode();
   updateEmailPreview();
   updateProxyHint();
 }
 
+function currentMailMode() {
+  const value = String(form.elements.mailMode?.value || "imap").toLowerCase();
+  return value === "hotmail" || value === "hotmail-graph" ? "hotmail" : "imap";
+}
+
+function updateMailMode() {
+  const mode = currentMailMode();
+  if (form.elements.mailMode) form.elements.mailMode.value = mode;
+  for (const node of document.querySelectorAll("[data-mail-mode]")) {
+    node.hidden = node.dataset.mailMode !== mode;
+  }
+  const title = element("mail-panel-title");
+  const subtitle = element("mail-panel-subtitle");
+  if (title) title.textContent = mode === "hotmail" ? "Hotmail Graph 接码" : "接码邮箱 IMAP";
+  if (subtitle) {
+    subtitle.textContent = mode === "hotmail"
+      ? "导入 email----password----clientId----refreshToken，测试通过后再批量注册。"
+      : "授权码用于读取验证码，不会写入日志。";
+  }
+  if (mode === "hotmail") refreshHotmailStatus(false).catch(() => {});
+}
+
 function updateEmailPreview() {
+  if (currentMailMode() !== "imap") return;
   const prefix = form.elements.mailPrefix.value.trim() || "mm";
   const domain = form.elements.mailDomain.value.trim() || "example.com";
   element("email-preview").textContent = `${prefix}<random>@${domain}`;
@@ -120,6 +144,10 @@ function renderStatus(status) {
   element("dry-run").disabled = status.running;
   element("test-panel").disabled = status.running;
   element("stop-run").disabled = !status.running;
+  for (const id of ["import-hotmail", "test-hotmail", "refresh-hotmail", "purge-hotmail", "keep-hotmail"]) {
+    const node = element(id);
+    if (node) node.disabled = status.running;
+  }
 }
 
 function formatTime(value) {
@@ -225,6 +253,119 @@ async function testPanel() {
   finally { button.disabled = false; }
 }
 
+async function importHotmail(replace = false) {
+  const button = element("import-hotmail");
+  button.disabled = true;
+  try {
+    const result = await go.ImportHotmailAccounts(readForm(), replace);
+    toast(result.message || "Hotmail 账号已导入", "success");
+    if (result.filePath && form.elements.hotmailPool) form.elements.hotmailPool.value = result.filePath;
+    await refreshHotmailStatus(false);
+  } catch (error) {
+    toast(`导入失败：${error.message || error}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function updateHotmailProgress(payload = {}) {
+  const wrap = element("hotmail-progress");
+  if (!wrap) return;
+  wrap.hidden = false;
+  const current = Number(payload.current || 0);
+  const total = Number(payload.total || 0);
+  const percent = total > 0 ? Math.max(0, Math.min(100, (current / total) * 100)) : 0;
+  const fill = element("hotmail-progress-fill");
+  if (fill) fill.style.transform = `scaleX(${percent / 100})`;
+  const label = element("hotmail-progress-label");
+  if (label) label.textContent = payload.message || "正在测活";
+  const counter = element("hotmail-progress-counter");
+  if (counter) counter.textContent = `${current} / ${total}`;
+  const detail = element("hotmail-progress-detail");
+  if (detail) {
+    const parts = [];
+    if (payload.email) parts.push(payload.email);
+    if (typeof payload.okCount === "number") parts.push(`可用 ${payload.okCount}`);
+    if (typeof payload.errorCount === "number") parts.push(`失效 ${payload.errorCount}`);
+    if (typeof payload.workers === "number" && payload.workers > 0) parts.push(`并行 ${payload.workers}`);
+    if (typeof payload.inFlight === "number" && payload.inFlight > 0) parts.push(`进行中 ${payload.inFlight}`);
+    detail.textContent = parts.join(" · ") || "测活时会显示实时进度";
+  }
+}
+
+function setHotmailBusy(busy) {
+  for (const id of ["import-hotmail", "test-hotmail", "refresh-hotmail", "purge-hotmail", "keep-hotmail"]) {
+    const node = element(id);
+    if (node) node.disabled = !!busy;
+  }
+}
+
+async function testHotmail() {
+  const button = element("test-hotmail");
+  button.disabled = true;
+  setHotmailBusy(true);
+  updateHotmailProgress({ current: 0, total: 0, message: "正在准备批量测活" });
+  try {
+    const result = await go.PreflightHotmailAccounts(readForm(), 0);
+    updateHotmailProgress({
+      current: result.checked || 0,
+      total: result.checked || 0,
+      okCount: result.okCount || 0,
+      errorCount: result.errorCount || 0,
+      message: result.message || "测活完成",
+    });
+    toast(result.message || "测活完成", "success");
+    await refreshHotmailStatus(false);
+  } catch (error) {
+    toast(`测活失败：${error.message || error}`, "error");
+  } finally {
+    setHotmailBusy(false);
+  }
+}
+
+async function purgeInvalidHotmail() {
+  if (!window.confirm("将从账号池删除所有已标记失效的邮箱，确认继续？")) return;
+  setHotmailBusy(true);
+  try {
+    const result = await go.PurgeInvalidHotmailAccounts(readForm());
+    toast(result.message || "已移除失效账号", "success");
+    await refreshHotmailStatus(false);
+  } catch (error) {
+    toast(`移除失效失败：${error.message || error}`, "error");
+  } finally {
+    setHotmailBusy(false);
+  }
+}
+
+async function keepValidHotmail() {
+  if (!window.confirm("将只保留可用和已成功使用的邮箱，失效/占用中的都会删除。确认继续？")) return;
+  setHotmailBusy(true);
+  try {
+    const result = await go.KeepValidHotmailAccounts(readForm());
+    toast(result.message || "已仅保留有效账号", "success");
+    await refreshHotmailStatus(false);
+  } catch (error) {
+    toast(`保留有效失败：${error.message || error}`, "error");
+  } finally {
+    setHotmailBusy(false);
+  }
+}
+
+async function refreshHotmailStatus(showToast = true) {
+  if (!go || currentMailMode() !== "hotmail") return;
+  try {
+    const result = await go.GetHotmailPoolStatus(readForm());
+    const hint = element("hotmail-hint");
+    if (hint) {
+      hint.textContent = result.message || `可用 ${result.available || 0} · 失效 ${result.error || 0} · 已用 ${result.used || 0} · 总计 ${result.total || 0}`;
+    }
+    if (result.filePath && form.elements.hotmailPool) form.elements.hotmailPool.value = result.filePath;
+    if (showToast) toast(result.message || "账号池状态已刷新", "success");
+  } catch (error) {
+    if (showToast) toast(`刷新池状态失败：${error.message || error}`, "error");
+  }
+}
+
 async function clearRunState(includeHistory) {
   if (!go) return;
   const question = includeHistory
@@ -248,9 +389,18 @@ async function init() {
   }
   for (const button of document.querySelectorAll(".nav-item")) button.addEventListener("click", () => setView(button.dataset.view));
   for (const name of ["mailPrefix", "mailDomain"]) form.elements[name].addEventListener("input", updateEmailPreview);
+  form.elements.mailMode.addEventListener("change", () => {
+    updateMailMode();
+    updateEmailPreview();
+  });
   form.elements.proxyUrl.addEventListener("input", updateProxyHint);
   element("save-config").addEventListener("click", () => saveConfig().catch((error) => toast(`保存失败：${error.message || error}`, "error")));
   element("test-panel").addEventListener("click", () => testPanel());
+  element("import-hotmail").addEventListener("click", () => importHotmail(false));
+  element("test-hotmail").addEventListener("click", () => testHotmail());
+  element("refresh-hotmail").addEventListener("click", () => refreshHotmailStatus(true));
+  element("purge-hotmail").addEventListener("click", () => purgeInvalidHotmail());
+  element("keep-hotmail").addEventListener("click", () => keepValidHotmail());
   element("dry-run").addEventListener("click", () => startRun(true));
   element("start-run").addEventListener("click", () => startRun(false));
   element("stop-run").addEventListener("click", () => go.StopRun());
@@ -264,6 +414,7 @@ async function init() {
   element("clear-logs").addEventListener("click", () => { element("log-list").innerHTML = '<div class="empty">已清空显示；后台日志仍保留在会话中。</div>'; });
   form.addEventListener("submit", (event) => event.preventDefault());
 
+  runtime.EventsOn("hotmail-progress", (payload) => updateHotmailProgress(payload || {}));
   runtime.EventsOn("run-event", (event) => {
     event = event || {};
     appendLog(event);
@@ -292,3 +443,5 @@ async function init() {
 }
 
 window.addEventListener("DOMContentLoaded", init);
+
+

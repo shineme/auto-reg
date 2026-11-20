@@ -1,0 +1,17 @@
+复制
+在本页
+- Proxies
+- Proxy Configuration Parameters
+## Session Types In the proxy configuration with username and password authentication, we provide two different types of session types: "Sticky" and "Rotating". Each type serves a different purpose to meet users&#x27; various needs.
+In this article, we will introduce you to proxy session types as well as rotation methods to help you understand the concept.
+## Sticky This option allows you to keep your proxy the same throughout your session. Sticky sessions involve the session parameter, which dictates how long the same proxy should be maintained. If it is necessary to rotate the proxy IP in advance, the value of the session parameter must also be changed. Otherwise, the IP address will not rotate within the session time.
+The session parameter allows you to retain the same IP address to run multiple requests. To reuse the same IP multiple times, use the session parameter after the username, with a value that is a random string consisting of 8 digits, for example, session-12345678.
+For instance, your initial query is assigned the proxy IP address 1.1.1.1 with session-12345678. As long as you keep sending new requests with the same session , and that the IP address is online and available, the system will route your queries to 1.1.1.1.
+You may manually modify the "session", the session value will instruct our server to allocate a new proxy IP address (for example, 1.1.1.2) for the connection. You may also manually set a sticky session duration using the parameter sessTime to any integer value between 5 and 180 inclusive. (180 minutes is the maximum possible proxy session duration)
+In addition, we provide an "Change IP in advance" feaure, when you select "Yes", the IP will be changed to another one based on its actual available time, and the IP count will be deducted; otherwise, the IP address will not be changed during the sticky time, and will only be replaced after the sticky time expires. When you manually change the proxy IP successfully, the corresponding number of IPs will also be deducted.
+## Rotating Rotating sessions provide you with a new proxy for each request. This means that every time you make a request, it will come from a different IP address. This method is ideal for tasks that require a high level of anonymity and reduced traceability, such as web scraping or accessing content without revealing the same identity.
+With this type of rotating sessions, there is no need to add the session value in the proxy string.
+The proxy list generated from rotating sessions, although showing the same proxy string information, will have different actual proxy IPs when used.
+上一页 Proxy Locations
+下一页 Host and Port
+这有帮助吗？

@@ -1,0 +1,24 @@
+复制
+在本页
+- Proxies
+- Proxy Configuration Parameters
+## Authentication Methods Enter our Proxy Setup panel where you can customize the settings used by your proxies. The panel provides various parameters for granular configuration, each setting allowing you to tailor the proxy details to your specific needs, such as choosing your country, state, defining rotation type, as well as output format and quantity.
+## API API is an authentication method for accessing proxies that allows you to obtain a specific proxy IP address through an API interface and use it to access the target website, simplifying the process. In essence, this feature enables you to establish predefined configurations which you can associate with IPs. Consequently, this eliminates the need for authentication credentials, allowing you to fetch the relevant details of a proxy IP by making a request to the API interface. This approach enhances flexibility and automation for your access, as you can integrate the API into your own applications or scripts, enabling the retrieval and management of proxy IPs.
+## Benefits of API API-based authentication offers several advantages over the more common username/password authentication.
+● Automated management
+● Real-time access
+● Security of your credentials
+● More flexible scaling
+Prior to configuring a proxy via API interface, it is necessary to whitelist the intended IP addresses that will be allowed to access the proxy services, permitting requests coming from whitelisted IP addresses only.
+For further guidance on using this feature, please refer to the " IP Whitelist " section within this chapter.
+## Username/Password Username/Password is an authentication method that involves generating a proxy string using a created username and password in order to verify access. A proxy string consists of 4 elements: hostname, port, username and password, by default we adopt the following format for the sake of simplicity: hostname:port:username:password, this section contains all the configuration details of the proxy. Username and password authentication enables users to access their proxies from any location, i.e. the username and password authentication ensures that the user can retrieve and use their proxies from any location.
+## Benefits of Username/Password As a common approach to configuring proxies, username and password provide users with greater control and flexibility over their proxy access.
+● More control
+● Easy password modification
+● Flexibility of use
+● Manual configuration
+Prior to configuring a proxy via username and password, it is necessary to create a sub-user which will allow access to proxy services using the sub-user&#x27;s username and password.
+For further guidance on using this feature, please refer to the " Sub-Users " section within this chapter.
+上一页 Proxy Configuration Parameters
+下一页 Sub-Users
+这有帮助吗？

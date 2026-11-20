@@ -1,4 +1,4 @@
-//go:build !web
+//go:build !web && !cli
 
 package main
 import (
@@ -26,6 +26,10 @@ func main() {
 	mailScanWorkers := flag.Int("mail-scan-workers", 0, "parallel workers for mail-scan")
 	mailScanLimit := flag.Int("mail-scan-limit", 0, "only scan the first N pool accounts (0 = all)")
 	supervised := flag.Bool("supervised", false, "supervised batch: auto-restart on failure until target reached or pool exhausted")
+	testCursor := flag.Bool("test-cursor", false, "run one Cursor registration test with a hotmail account")
+	cursorPanel := flag.String("cursor-panel", "", "panel base url for cursor test")
+	cursorKey := flag.String("cursor-key", "", "panel key for cursor test")
+	cursorEmail := flag.String("cursor-email", "", "use a specific hotmail account for the cursor test")
 	flag.Parse()
 	if *testOne {
 		runCLITestOne()
@@ -45,6 +49,10 @@ func main() {
 	}
 	if *mailScan {
 		runCLIMailScanFull(*mailScanWorkers, *mailScanLimit)
+		return
+	}
+	if *testCursor {
+		runCLITestCursor(*cursorPanel, *cursorKey, *cursorEmail)
 		return
 	}
 	if *supervised {

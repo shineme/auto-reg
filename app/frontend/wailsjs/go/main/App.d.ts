@@ -8,21 +8,33 @@ export function ClearRunState(arg1:boolean):Promise<Record<string, any>>;
 
 export function GetConfig():Promise<main.Config>;
 
+export function GetHotmailPoolStatus(arg1:main.Config):Promise<main.HotmailPoolStatus>;
+
 export function GetLatestResults():Promise<Array<main.Result>>;
 
 export function GetRunEvents():Promise<Array<main.RunEvent>>;
 
 export function GetRunStatus():Promise<main.RunStatus>;
 
+export function ImportHotmailAccounts(arg1:main.Config,arg2:boolean):Promise<main.HotmailImportResult>;
+
+export function KeepValidHotmailAccounts(arg1:main.Config):Promise<main.HotmailPoolCleanupResult>;
+
 export function NormalizeProxy(arg1:string):Promise<string>;
 
 export function OpenOutputDir():Promise<void>;
+
+export function PreflightHotmailAccounts(arg1:main.Config,arg2:number):Promise<main.HotmailPreflightResult>;
+
+export function PurgeInvalidHotmailAccounts(arg1:main.Config):Promise<main.HotmailPoolCleanupResult>;
 
 export function SaveConfig(arg1:main.Config):Promise<void>;
 
 export function StartRun(arg1:main.Config,arg2:boolean):Promise<void>;
 
 export function StopRun():Promise<void>;
+
+export function TestHotmailAccounts(arg1:main.Config,arg2:number):Promise<main.HotmailTestResult>;
 
 export function TestPanel(arg1:main.Config):Promise<main.PanelCheckResult>;
 

@@ -14,7 +14,11 @@ export function GetHotmailStats(arg1:main.Config):Promise<main.HotmailPoolStats>
 
 export function GetProgress():Promise<main.BatchSummary>;
 
+export function GetProgressLite():Promise<main.ProgressLite>;
+
 export function GetProxyPoolStats(arg1:main.Config):Promise<main.ProxyPoolStats>;
+
+export function GetResultsPage(arg1:main.Config,arg2:number,arg3:number,arg4:string,arg5:string):Promise<main.ResultsPage>;
 
 export function ImportHotmail(arg1:main.Config):Promise<main.HotmailPoolStats>;
 
@@ -38,11 +42,17 @@ export function RemoveSkippedHotmail(arg1:main.Config):Promise<main.HotmailPoolS
 
 export function SaveConfig(arg1:main.Config):Promise<main.Config>;
 
+export function SearchMailboxes(arg1:main.Config,arg2:string,arg3:number):Promise<Array<main.MailboxOption>>;
+
 export function StartBatch(arg1:main.Config):Promise<void>;
+
+export function StartCursorBinding(arg1:main.Config,arg2:number):Promise<void>;
 
 export function StartSupervised(arg1:main.Config):Promise<void>;
 
 export function StopBatch():Promise<void>;
+
+export function StopCursorBinding():Promise<void>;
 
 export function StopSupervised():Promise<void>;
 

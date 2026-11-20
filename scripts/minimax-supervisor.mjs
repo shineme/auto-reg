@@ -12,6 +12,7 @@ const lockPath = path.join(batchRoot, "supervisor.lock");
 const statusPath = path.join(batchRoot, "supervisor.status.json");
 const progressPath = path.join(batchRoot, "supervisor.progress.json");
 const ledgerPath = path.join(batchRoot, "resume-ledger.json");
+const poolExhaustedPath = path.join(batchRoot, "pool-exhausted.json");
 const summaryPath = path.join(root, "summary.json");
 const batchScript = path.resolve(process.env.MINIMAX_BATCH_SCRIPT || path.join(workspace, "scripts", "minimax-fast-batch.mjs"));
 const captchaUnavailablePattern = /reCAPTCHA Enterprise did not become ready|reCAPTCHA Enterprise returned no ticket|CDP browser did not become ready|CDP version HTTP|reCAPTCHA 票据环境暂不可用/i;
@@ -116,6 +117,21 @@ function printStructuredProgress(line, restartCount) {
   if (!event || typeof event !== "object") return;
   if (event.type === "progress" || event.type === "account-result") {
     publishProgress({ ...event, batchId, restartCount });
+  } else if (event.type === "hotmail-pool") {
+    publishProgress({
+      type: "progress",
+      phase: "hotmail-pool",
+      message: event.message || (
+        event.action === "release" ? "失败账号已放回池中复用"
+          : event.action === "mark-skipped" ? "注册授权失败，已跳过该邮箱"
+            : "已跳过失效邮箱"
+      ),
+      email: event.email || "",
+      action: event.action || "",
+      batchId,
+      restartCount,
+      at: event.at || new Date().toISOString(),
+    });
   }
 }
 
@@ -150,24 +166,11 @@ async function collectResults() {
 
 async function removeStaleRiskFiles() {
   await fs.rm(path.join(batchRoot, "risk-state.json"), { force: true });
+  await fs.rm(poolExhaustedPath, { force: true });
   const entries = await fs.readdir(batchRoot, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     await fs.rm(path.join(batchRoot, entry.name, "risk-control.json"), { force: true });
-    if (!/^\d{8}-\d{6}$/.test(entry.name) && entry.name !== batchId) continue;
-    const accounts = await fs.readdir(path.join(batchRoot, entry.name), { withFileTypes: true }).catch(() => []);
-    for (const account of accounts) {
-      if (!account.isDirectory() || !account.name.startsWith("account-")) continue;
-      let result;
-      try {
-        result = JSON.parse(await fs.readFile(path.join(batchRoot, entry.name, account.name, "result.json"), "utf8"));
-      } catch {
-        continue;
-      }
-      if (!result.ok && /1200063|人机验证未通过|Verification failed, please try again/i.test(result.error || "")) {
-        await fs.rm(path.join(batchRoot, entry.name, account.name, "result.json"), { force: true });
-      }
-    }
   }
 }
 
@@ -289,6 +292,7 @@ function redactText(value) {
   return String(value)
     .replace(/(^|[?&])((?:k|key|token|password|secret|ticket|auth|authorization|code)=)[^&\s"'<>]+/gi, "$1$2***")
     .replace(/(PANEL_KEY|IMAP_PASSWORD|ticket|Proxy-Authorization|Authorization)([=:]\s*)[^\s,;]+/gi, "$1$2***")
+    .replace(/(HOTMAIL_RAW|HOTMAIL_ACCOUNT_JSON|HOTMAIL_REFRESH_TOKEN|refreshToken|refresh_token)([=:]\s*)[^\s,;]+/gi, "$1$2***")
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1***");
 }
 
@@ -351,9 +355,13 @@ async function main() {
     while (true) {
       prepared = await prepareResumeBatch();
       const before = await currentSummary();
-      if (prepared.succeeded >= targetSuccessCount || before.finishedAt) {
-        await publishStatus({ phase: "done", running: false, succeeded: before.succeeded, failed: before.failed, restartCount, message: `已完成 ${before.succeeded}/${targetSuccessCount} 个成功账号` });
-        await publishProgress(progressEvent({ phase: "done", done: before.succeeded, ok: before.succeeded, failed: before.failed, attempts: before.attempts, restartCount, message: `已完成 ${before.succeeded}/${targetSuccessCount} 个成功账号` }));
+      const poolExhausted = await fs.stat(poolExhaustedPath).then(() => true).catch(() => false);
+      if (prepared.succeeded >= targetSuccessCount || before.finishedAt || poolExhausted) {
+        const doneMessage = poolExhausted && prepared.succeeded < targetSuccessCount
+          ? `邮箱池已用尽，已成功 ${before.succeeded}/${targetSuccessCount} 个，批次结束`
+          : `已完成 ${before.succeeded}/${targetSuccessCount} 个成功账号`;
+        await publishStatus({ phase: "done", running: false, succeeded: before.succeeded, failed: before.failed, restartCount, message: doneMessage });
+        await publishProgress(progressEvent({ phase: "done", done: before.succeeded, ok: before.succeeded, failed: before.failed, attempts: before.attempts, restartCount, message: doneMessage }));
         return;
       }
       await publishStatus({ phase: "running", running: true, succeeded: before.succeeded, failed: before.failed, restartCount, message: restartCount ? `异常后第 ${restartCount} 次自动恢复，正在继续注册` : "正在注册账号" });
@@ -361,9 +369,13 @@ async function main() {
       const child = await runChild(restartCount);
       prepared = await prepareResumeBatch();
       const after = await currentSummary();
-      if (prepared.succeeded >= targetSuccessCount || after.finishedAt) {
-        await publishStatus({ phase: "done", running: false, succeeded: after.succeeded, failed: after.failed, restartCount, message: `已完成 ${after.succeeded}/${targetSuccessCount} 个成功账号` });
-        await publishProgress(progressEvent({ phase: "done", done: after.succeeded, ok: after.succeeded, failed: after.failed, attempts: after.attempts, restartCount, message: `已完成 ${after.succeeded}/${targetSuccessCount} 个成功账号` }));
+      const poolEmpty = await fs.stat(poolExhaustedPath).then(() => true).catch(() => false);
+      if (prepared.succeeded >= targetSuccessCount || after.finishedAt || poolEmpty) {
+        const doneMessage = poolEmpty && prepared.succeeded < targetSuccessCount
+          ? `邮箱池已用尽，已成功 ${after.succeeded}/${targetSuccessCount} 个，批次结束`
+          : `已完成 ${after.succeeded}/${targetSuccessCount} 个成功账号`;
+        await publishStatus({ phase: "done", running: false, succeeded: after.succeeded, failed: after.failed, restartCount, message: doneMessage });
+        await publishProgress(progressEvent({ phase: "done", done: after.succeeded, ok: after.succeeded, failed: after.failed, attempts: after.attempts, restartCount, message: doneMessage }));
         return;
       }
       if (child.code === 0 && !child.targetReached) {

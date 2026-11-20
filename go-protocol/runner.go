@@ -48,14 +48,26 @@ type ProtocolRunner struct {
 	summary    BatchSummary
 	onLog      func(level, msg string)
 	onState    func(BatchSummary)
+	onStep     func(StepEvent)
+}
+
+// StepEvent 描述一次注册流程的阶段跃迁，前端据此把日志渲染成"运行流"。
+type StepEvent struct {
+	Stage   string `json:"stage"`
+	Email   string `json:"email"`
+	Worker  int    `json:"worker"`
+	Attempt int    `json:"attempt"`
+	Time    string `json:"time"`
+	Seq     int64  `json:"seq"`
 }
 
 var bindingCeremonyMu sync.Mutex
 
-func NewProtocolRunner(onLog func(level, msg string), onState func(BatchSummary)) *ProtocolRunner {
+func NewProtocolRunner(onLog func(level, msg string), onState func(BatchSummary), onStep func(StepEvent)) *ProtocolRunner {
 	return &ProtocolRunner{
 		onLog:   onLog,
 		onState: onState,
+		onStep:  onStep,
 	}
 }
 
@@ -343,13 +355,24 @@ func (r *ProtocolRunner) workerLoop(ctx context.Context, cfg Config, workerID in
 	}
 }
 
-func (r *ProtocolRunner) setStage(stage, email string) {
+func (r *ProtocolRunner) setStage(stage, email string, worker int) {
 	r.mu.Lock()
 	r.summary.CurrentStage = stage
 	if email != "" {
 		r.summary.CurrentEmail = email
 	}
+	seq := r.attemptSeq
 	r.mu.Unlock()
+	if r.onStep != nil {
+		r.onStep(StepEvent{
+			Stage:   stage,
+			Email:   email,
+			Worker:  worker,
+			Attempt: int(seq),
+			Time:    time.Now().Format("15:04:05"),
+			Seq:     seq,
+		})
+	}
 	r.emitState()
 }
 
@@ -399,7 +422,7 @@ func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDi
 		}
 	}
 
-	r.setStage("申请设备码", res.Email)
+	r.setStage("申请设备码", res.Email, workerID)
 	signIn, err := panel.StartPluginSignIn(ctx)
 	if err != nil {
 		// Try re-login once
@@ -422,7 +445,7 @@ func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDi
 		}
 	}
 
-	r.setStage("获取风控票据", res.Email)
+	r.setStage("获取风控票据", res.Email, workerID)
 	ticketRes, err := tp.AcquireTicket(ctx, res.Email, signIn.Code)
 	if err != nil {
 		res.Error = "获取票据失败: " + err.Error()
@@ -452,7 +475,7 @@ func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDi
 		r.emitLog("info", "警告：当前会话缺少 _abck，发码可能被拒")
 	}
 
-	r.setStage("注册设备", res.Email)
+	r.setStage("注册设备", res.Email, workerID)
 	// 始终走 register-device，拿到服务端 deviceIDStr；页面 localStorage 里的硬件信息不能直接当设备 ID。
 	if err := mm.RegisterDevice(ctx); err != nil {
 		res.Error = "注册设备失败: " + err.Error()
@@ -461,7 +484,7 @@ func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDi
 		return res
 	}
 
-	r.setStage("检查账号状态", res.Email)
+	r.setStage("检查账号状态", res.Email, workerID)
 	code, msg, err := mm.CheckAccount(ctx, res.Email, loginRedirect)
 	if err != nil {
 		res.Error = "检查账号失败: " + err.Error()
@@ -476,7 +499,7 @@ func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDi
 		r.emitLog("info", fmt.Sprintf("[%s] 预检提示该邮箱已有密码/已注册(code=%d)，建密大概率被拒，属号池残留账号", res.Email, code))
 	}
 
-	r.setStage("发送邮箱验证码", res.Email)
+	r.setStage("发送邮箱验证码", res.Email, workerID)
 	sendStartedAt := time.Now()
 	sendErr := mm.SendCode(ctx, res.Email, ticketRes.Ticket)
 	for attempt := 1; attempt <= 2 && sendErr != nil; attempt++ {
@@ -504,7 +527,7 @@ func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDi
 		return res
 	}
 
-	r.setStage("轮询邮箱验证码", res.Email)
+	r.setStage("轮询邮箱验证码", res.Email, workerID)
 	var verifyCode string
 	if cfg.MailMode == "hotmail" {
 		var mailHTTP *http.Client
@@ -540,7 +563,7 @@ func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDi
 		}
 	}
 
-	r.setStage("创建密码并登录", res.Email)
+	r.setStage("创建密码并登录", res.Email, workerID)
 	if strings.TrimSpace(cfg.FixedPassword) != "" {
 		r.emitLog("info", fmt.Sprintf("[%s] 使用固定密码模式（长度 %d）；否则为随机强密码", res.Email, len(cfg.FixedPassword)))
 	}
@@ -621,7 +644,7 @@ func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDi
 	}
 
 
-	r.setStage("设备授权审批", res.Email)
+	r.setStage("设备授权审批", res.Email, workerID)
 	panel.CeremonyLock()
 	if err := mm.AuthorizeDevice(ctx, signIn.Code); err != nil {
 		panel.CeremonyUnlock()
@@ -632,7 +655,7 @@ func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDi
 	}
 	r.emitLog("info", fmt.Sprintf("[%d] [%s] 授权成功，等待面板落库", workerID, res.Email))
 
-	r.setStage("等待面板绑定完成", res.Email)
+	r.setStage("等待面板绑定完成", res.Email, workerID)
 	beforeUsers, _ := panel.ListMiniMaxUsers(ctx)
 	// 多路并行时面板落库排队会更久，等待窗口放宽到 180s（锁内串行）
 	pollResp, providersUser, err := panel.WaitForBinding(ctx, signIn.ID, beforeUsers, 180*time.Second)
@@ -652,7 +675,7 @@ func (r *ProtocolRunner) runOne(ctx context.Context, cfg Config, dialer *ProxyDi
 	finalizeHotmail("used", "")
 	r.emitLog("info", fmt.Sprintf("注册并绑定成功: %s -> %s", res.Email, res.ProviderName))
 	r.dumpSession(cfg, res.Email, mm.CookieSnapshot())
-	r.dailySignin(ctx, cfg, mm, &res)
+	r.dailySignin(ctx, cfg, mm, &res, workerID)
 	return res
 }
 
@@ -674,11 +697,11 @@ func (r *ProtocolRunner) dumpSession(cfg Config, email string, cookies map[strin
 }
 
 // dailySignin 在注册成功后，用自己的 OAuth 设备码换 access token 并完成每日签到。
-func (r *ProtocolRunner) dailySignin(ctx context.Context, cfg Config, mm *MiniMaxClient, res *AccountResult) {
+func (r *ProtocolRunner) dailySignin(ctx context.Context, cfg Config, mm *MiniMaxClient, res *AccountResult, workerID int) {
 	if !cfg.SigninAfterRegister {
 		return
 	}
-	r.setStage("每日签到领取积分", res.Email)
+	r.setStage("每日签到领取积分", res.Email, workerID)
 	signCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 

@@ -28,12 +28,14 @@ The mechanism is a protocol-first batch runner: it performs panel, device-code, 
 
 - Local Windows desktop, with Go, Node.js, Google Chrome, and the repository's `scripts/` protocol helpers available.
 - User supplies magpie panel key, domain email suffix, catch-all inbox address, IMAP authorization code, proxy URL, and batch parameters.
+- Alternatively, the user can import Hotmail / Outlook Graph accounts in `email----password----clientId----refreshToken` form and use Graph mail receive for verification codes.
 - Proxy URLs must accept `socks5://user:pass@host:port`, `http://user:pass@host:port`, compact `scheme://user:pass:host:port`, and escaped `http\://...`; all forms normalize to one local bridge.
 - A local HTTP CONNECT bridge is needed because downstream Node helpers and CDP page launches can route through a single local proxy URL even when the configured upstream is SOCKS5.
 
 ## Capabilities and Constraints
 
 - GUI configuration for panel URL/key, domain email prefix/suffix, IMAP host/port/user/authorization code, proxy, batch count, prewarm concurrency, and output directory.
+- GUI support for Hotmail Graph import, pool status, receive testing, and registration using claimed Graph accounts.
 - Local, machine-readable config persistence. Sensitive values stay on the user's machine and are not emitted in logs.
 - Start, stop, dry-run, configuration reload, result inspection, and live event streaming.
 - HTTP/SOCKS5 proxy normalization and local bridge support.

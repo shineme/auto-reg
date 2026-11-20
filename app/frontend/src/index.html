@@ -50,18 +50,25 @@
             <div class="fields two-col">
               <label class="field"><span>面板地址</span><input name="panelBase" autocomplete="off" /></label>
               <label class="field"><span>面板密钥</span><input name="panelKey" type="password" autocomplete="off" /></label>
-              <label class="field"><span>邮箱域名</span><input name="mailDomain" placeholder="example.com" autocomplete="off" /></label>
-              <label class="field"><span>邮箱前缀</span><input name="mailPrefix" placeholder="mm" autocomplete="off" /></label>
+              <label class="field"><span>邮箱模式</span>
+                <select name="mailMode">
+                  <option value="imap">域名邮箱 + IMAP 接码</option>
+                  <option value="hotmail">Hotmail Graph 导入接码</option>
+                </select>
+              </label>
+              <label class="field" data-mail-mode="imap"><span>邮箱前缀</span><input name="mailPrefix" placeholder="mm" autocomplete="off" /></label>
+              <label class="field" data-mail-mode="imap"><span>邮箱域名</span><input name="mailDomain" placeholder="example.com" autocomplete="off" /></label>
             </div>
-            <p class="hint">生成格式：<code id="email-preview">mm&lt;random&gt;@example.com</code></p>
+            <p class="hint" id="email-preview-wrap" data-mail-mode="imap">生成格式：<code id="email-preview">mm&lt;random&gt;@example.com</code></p>
+            <p class="hint" id="hotmail-preview-wrap" data-mail-mode="hotmail" hidden>注册邮箱将直接使用导入的 Hotmail / Outlook 账号。</p>
           </section>
 
           <section class="panel">
             <div class="panel-head">
-              <div><h2>接码邮箱 IMAP</h2><p>授权码用于读取验证码，不会写入日志。</p></div>
+              <div><h2 id="mail-panel-title">接码邮箱 IMAP</h2><p id="mail-panel-subtitle">授权码用于读取验证码，不会写入日志。</p></div>
               <span class="panel-index">MAIL</span>
             </div>
-            <div class="fields">
+            <div class="fields" data-mail-mode="imap">
               <label class="field"><span>收件邮箱 / 别名</span><input name="mailbox" autocomplete="off" /></label>
               <div class="fields two-col compact">
                 <label class="field"><span>IMAP 主机</span><input name="imapHost" autocomplete="off" /></label>
@@ -69,6 +76,27 @@
               </div>
               <label class="field"><span>IMAP 登录名</span><input name="imapUser" autocomplete="off" /></label>
               <label class="field"><span>IMAP 授权码</span><input name="imapPassword" type="password" autocomplete="off" /></label>
+            </div>
+            <div class="fields" data-mail-mode="hotmail" hidden>
+              <label class="field"><span>Hotmail Graph 账号</span><textarea name="hotmailRaw" rows="8" spellcheck="false" placeholder="email----password----clientId----refreshToken"></textarea></label>
+              <label class="field"><span>账号池文件</span><input name="hotmailPool" autocomplete="off" /></label>
+              <label class="field"><span>测活线程数</span><input name="hotmailPreflightWorkers" type="number" min="1" max="32" step="1" /></label>
+              <p class="hint" id="hotmail-hint">格式：邮箱----密码----ClientID----RefreshToken；支持一次性导入多行。</p>
+              <div class="hotmail-progress" id="hotmail-progress" hidden>
+                <div class="progress-meta">
+                  <span id="hotmail-progress-label">等待测活</span>
+                  <b id="hotmail-progress-counter">0 / 0</b>
+                </div>
+                <div class="progress-track"><div id="hotmail-progress-fill"></div></div>
+                <p class="progress-detail" id="hotmail-progress-detail">测活时会显示实时进度</p>
+              </div>
+              <div class="actions" style="justify-content:flex-start;padding:0">
+                <button class="button secondary" type="button" id="import-hotmail">导入账号池</button>
+                <button class="button secondary" type="button" id="test-hotmail">批量测活</button>
+                <button class="button secondary" type="button" id="refresh-hotmail">刷新池状态</button>
+                <button class="button secondary" type="button" id="purge-hotmail">一键移除失效</button>
+                <button class="button secondary" type="button" id="keep-hotmail">一键保留有效</button>
+              </div>
             </div>
           </section>
 

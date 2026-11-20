@@ -107,6 +107,8 @@ func (s *WebServer) dispatch(name string, args []json.RawMessage) (any, error) {
 		return s.app.SaveConfig(cfg)
 	case "GetProgress":
 		return s.app.GetProgress(), nil
+	case "GetProgressLite":
+		return s.app.GetProgressLite(), nil
 	case "TestPanel":
 		return s.app.TestPanel(cfg)
 	case "ImportHotmail":
@@ -139,6 +141,32 @@ func (s *WebServer) dispatch(name string, args []json.RawMessage) (any, error) {
 		return s.app.MailMessageView(cfg, email, msgID)
 	case "MailListOptions":
 		return s.app.MailListOptions(cfg)
+	case "SearchMailboxes":
+		query := ""
+		if len(args) > 1 {
+			_ = json.Unmarshal(args[1], &query)
+		}
+		limit := 50
+		if len(args) > 2 {
+			_ = json.Unmarshal(args[2], &limit)
+		}
+		return s.app.SearchMailboxes(cfg, query, limit)
+	case "GetResultsPage":
+		offset, limit := 0, 50
+		query, sortBy := "", ""
+		if len(args) > 1 {
+			_ = json.Unmarshal(args[1], &offset)
+		}
+		if len(args) > 2 {
+			_ = json.Unmarshal(args[2], &limit)
+		}
+		if len(args) > 3 {
+			_ = json.Unmarshal(args[3], &query)
+		}
+		if len(args) > 4 {
+			_ = json.Unmarshal(args[4], &sortBy)
+		}
+		return s.app.GetResultsPage(cfg, offset, limit, query, sortBy)
 	case "ClearHistory":
 		return nil, s.app.ClearHistory(cfg)
 	case "StartSupervised":

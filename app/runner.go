@@ -338,10 +338,14 @@ func (runner *runner) execute(ctx context.Context, cfg Config, dryRun bool) erro
 		"IMAP_USER="+cfg.ImapUser,
 		"IMAP_PASSWORD="+cfg.ImapPassword,
 		"IMAP_MAILBOX=INBOX",
+		"MAIL_MODE="+cfg.MailMode,
 		"MAIL_DOMAIN="+cfg.MailDomain,
 		"MAIL_PREFIX="+cfg.MailPrefix,
+		"HOTMAIL_POOL_PATH="+cfg.HotmailPool,
 		fmt.Sprintf("COUNT=%d", cfg.Count),
 		fmt.Sprintf("TARGET_SUCCESS_COUNT=%d", cfg.Count),
+		fmt.Sprintf("WORKERS=%d", cfg.Workers),
+		"MINIMAX_UPSTREAM_PROXY_URL="+cfg.ProxyURL,
 		"CHROME_PATH="+cfg.ChromePath,
 		"CHROME_PROFILE_ROOT="+filepath.Join(cfg.OutputDir, "chrome-profiles"),
 		"BATCH_ROOT="+cfg.OutputDir,
@@ -682,12 +686,14 @@ func readSupervisorSummary(outputDir, batchID string) (SupervisorSummary, error)
 var (
 	sensitiveQuery      = regexp.MustCompile(`(?i)([?&](?:k|key|token|password|secret|ticket|auth|authorization|code)=)[^&\s"'<>]+`)
 	sensitiveAssignment = regexp.MustCompile(`(?i)(PANEL_KEY|IMAP_PASSWORD|ticket|Proxy-Authorization|Authorization)([=:]\s*)[^\s,;]+`)
+ 	sensitiveHotmail     = regexp.MustCompile(`(?i)(HOTMAIL_RAW|HOTMAIL_ACCOUNT_JSON|HOTMAIL_REFRESH_TOKEN|refreshToken|refresh_token)([=:]\s*)[^\s,;]+`)
 	bearerToken         = regexp.MustCompile(`(?i)(Bearer\s+)[A-Za-z0-9._~+/=-]+`)
 )
 
 func redactLine(line string) string {
 	redacted := sensitiveQuery.ReplaceAllString(line, "$1***")
 	redacted = sensitiveAssignment.ReplaceAllString(redacted, "$1$2***")
+	redacted = sensitiveHotmail.ReplaceAllString(redacted, "$1$2***")
 	redacted = bearerToken.ReplaceAllString(redacted, "$1***")
 	return redacted
 }

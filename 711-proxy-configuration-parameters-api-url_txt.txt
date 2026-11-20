@@ -1,0 +1,14 @@
+复制
+在本页
+- Proxies
+- Proxy Configuration Parameters
+## API URL In proxy configuration with API, the "Get API URL" module is the final and essential step in configuring your proxies, which shows as a URL. You may specify the number of proxies that you wish to see or export, and customize your URL by choosing the format, separator that best suits your needs.
+You can directly obtain proxy IP addresses via API interface, or you may open the URL, copy the proxy list in "host:port" format to your clipboard to use.
+For more information about API configuration and fetching proxies, please check out the corresponding Proxy Usage Guides:
+Residential Proxies - GB
+Residential Proxies - IP
+Unlimited Proxies - High Bandwidth
+SOCKS5 Proxies
+上一页 Proxy String
+下一页 Testing Command (cURL example)
+这有帮助吗？

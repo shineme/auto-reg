@@ -1,0 +1,265 @@
+<body>
+  <div class="stage">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark">M</div>
+        <div>
+          <h1>MiniMax 协议注册工作台</h1>
+          <p>纯 Go 协议实现 · 零 Node.js · 面板账号自动绑定</p>
+        </div>
+      </div>
+      <div class="topbar-spacer"></div>
+      <div class="topbar-actions">
+        <div class="status-pill" id="statusPill"><span class="dot"></span><span id="statusText">待机</span></div>
+        <button class="btn btn-ghost btn-sm" id="btnSave">保存配置</button>
+        <button class="btn btn-ok" id="btnSupStart">开始监督批量</button>
+        <button class="btn btn-danger" id="btnSupStop">停止监督</button>
+      </div>
+    </header>
+
+    <div class="banner" id="banner">
+      <span id="bannerText"></span>
+      <span class="spacer"></span>
+      <button class="btn btn-sm" id="bannerRetry">重试加载</button>
+      <button class="btn btn-sm btn-ghost" id="bannerClose">忽略</button>
+    </div>
+
+    <div class="layout">
+      <!-- ============ 左：配置 ============ -->
+      <aside class="col-config">
+
+        <!-- 面板 -->
+        <section class="card sec-panel">
+          <div class="card-head">
+            <span class="accent-bar"></span><h2>面板绑定</h2>
+            <span class="spacer"></span><span class="sub">多线程可分摊到两个面板</span>
+          </div>
+          <div class="grid2">
+            <label class="field"><span class="lab">面板地址</span><input id="panelBase" spellcheck="false" /></label>
+            <label class="field"><span class="lab">面板密码 / Key</span><input id="panelKey" type="password" /></label>
+            <label class="field"><span class="lab">面板 2 地址 <em>可选</em></span><input id="panel2Base" placeholder="留空则只用主面板" spellcheck="false" /></label>
+            <label class="field"><span class="lab">面板 2 密码 / Key</span><input id="panel2Key" type="password" /></label>
+          </div>
+          <div class="row-btns">
+            <button class="btn btn-sm" id="btnTestPanel">测试面板连接</button>
+          </div>
+        </section>
+
+        <!-- 任务 -->
+        <section class="card sec-task">
+          <div class="card-head">
+            <span class="accent-bar"></span><h2>注册任务</h2>
+            <span class="spacer"></span><span class="sub" id="taskHint">目标 —</span>
+          </div>
+          <div class="grid2">
+            <label class="field">
+              <span class="lab">接码模式</span>
+              <select id="mailMode">
+                <option value="hotmail">Hotmail Graph 号池</option>
+                <option value="imap">域名邮箱 + IMAP</option>
+              </select>
+            </label>
+            <label class="field"><span class="lab">目标成功数量</span><input id="count" type="number" min="1" max="5000" /></label>
+            <label class="field"><span class="lab">并行线路数 <em>1-16</em></span><input id="workers" type="number" min="1" max="16" /></label>
+            <label class="field"><span class="lab">签到时区 <em>timezone_id</em></span><input id="timezoneId" placeholder="Asia/Shanghai" spellcheck="false" /></label>
+          </div>
+          <div class="divider"></div>
+          <label class="switch"><input type="checkbox" id="captchaDirect" /><span class="track"></span><span class="txt">验证码页面直连<br /><em style="color:var(--dim);font-style:normal">代理不稳时勾选</em></span></label>
+          <label class="switch"><input type="checkbox" id="mailViaProxy" /><span class="track"></span><span class="txt">邮箱取码走代理<br /><em style="color:var(--dim);font-style:normal">默认直连，代理失效时别勾</em></span></label>
+          <label class="switch"><input type="checkbox" id="signinAfterRegister" /><span class="track"></span><span class="txt">注册后自动签到领积分<br /><em style="color:var(--dim);font-style:normal">MiniMax Code 每日签到</em></span></label>
+          <div class="row-btns">
+            <button class="btn btn-primary" id="btnStart">开始纯 Go 注册</button>
+            <button class="btn btn-danger" id="btnStop" disabled>停止任务</button>
+          </div>
+        </section>
+
+        <!-- 收件 -->
+        <section class="card sec-mail">
+          <div class="card-head">
+            <span class="accent-bar"></span><h2>邮箱与收件</h2>
+            <span class="spacer"></span><span class="sub" id="poolStatus">号池：未加载</span>
+          </div>
+
+          <div id="hotmailBox">
+            <label class="field">
+              <span class="lab">Hotmail Graph 文本 <em>email----pass----clientId----refreshToken</em></span>
+              <textarea id="hotmailRaw" placeholder="粘贴 Hotmail 账号行后点击“导入号池”"></textarea>
+            </label>
+            <div class="hint" id="rawCount" style="margin-top:5px;">已粘贴 0 行 / 0 字符</div>
+            <div class="file-row" style="margin-top:8px;">
+              <input type="file" id="rawFile" accept=".txt" />
+              <button class="btn btn-sm" id="btnImportFile">选择文件并导入</button>
+            </div>
+            <div class="divider"></div>
+            <div class="grid2">
+              <label class="field"><span class="lab">号池文件路径</span><input id="hotmailPool" spellcheck="false" /></label>
+              <label class="field"><span class="lab">测活并发线程</span><input id="hotmailPreflightWorkers" type="number" min="1" max="32" /></label>
+            </div>
+            <div class="row-btns">
+              <button class="btn btn-sm" id="btnImport">导入号池</button>
+              <button class="btn btn-sm" id="btnPreflight">多线程测活</button>
+              <button class="btn btn-sm btn-danger" id="btnRemoveSkipped">一键移除失效</button>
+            </div>
+          </div>
+
+          <div id="imapBox" class="hidden">
+            <div class="grid2">
+              <label class="field"><span class="lab">邮箱域名</span><input id="mailDomain" spellcheck="false" /></label>
+              <label class="field"><span class="lab">邮箱前缀</span><input id="mailPrefix" spellcheck="false" /></label>
+              <label class="field"><span class="lab">IMAP 主机</span><input id="imapHost" spellcheck="false" /></label>
+              <label class="field"><span class="lab">IMAP 端口</span><input id="imapPort" type="number" /></label>
+              <label class="field"><span class="lab">IMAP 账号</span><input id="imapUser" spellcheck="false" /></label>
+              <label class="field"><span class="lab">IMAP 授权码</span><input id="imapPassword" type="password" /></label>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+          <div class="row-btns">
+            <button class="btn btn-sm" id="btnCheckinAll">批量补签</button>
+            <button class="btn btn-sm" id="btnMailScan">批量收信</button>
+          </div>
+        </section>
+
+        <!-- 代理 -->
+        <section class="card sec-proxy">
+          <div class="card-head">
+            <span class="accent-bar"></span><h2>代理与节点池</h2>
+            <span class="spacer"></span><span class="sub" id="poolStats">节点池：未加载</span>
+          </div>
+          <label class="field"><span class="lab">代理地址 <em>socks5:// / http:// / 紧凑格式</em></span><input id="proxyUrl" placeholder="留空直连" spellcheck="false" /></label>
+          <div class="grid2" style="margin-top:9px;">
+            <label class="field">
+              <span class="lab">代理商家类型</span>
+              <select id="proxyStyle">
+                <option value="auto">自动识别（cliproxy / 711）</option>
+                <option value="711">711（session- + sessTime-）</option>
+                <option value="clipproxy">Cliproxy（sid- + t- + st-）</option>
+              </select>
+            </label>
+            <label class="field"><span class="lab">Cliproxy 州省 <em>可选</em></span><input id="proxyState" placeholder="留空=不限" spellcheck="false" /></label>
+            <label class="field"><span class="lab">代理区域轮换 <em>711，逗号分隔</em></span><input id="proxyRegionRotate" placeholder="如 JP,US,GB" spellcheck="false" /></label>
+            <label class="field"><span class="lab">Sticky 时长 <em>分钟 5-180</em></span><input id="proxySessTime" type="number" min="0" max="180" placeholder="0=默认" /></label>
+          </div>
+          <label class="switch"><input type="checkbox" id="proxySticky" /><span class="track"></span><span class="txt">启用 Sticky 会话 <em style="color:var(--dim);font-style:normal">关闭=每请求换 IP</em></span></label>
+          <div class="divider"></div>
+          <label class="field"><span class="lab">订阅地址 <em>Clash YAML / base64 链接列表</em></span><input id="proxySubscriptionUrl" placeholder="https://.../sub?token=..." spellcheck="false" /></label>
+          <div class="grid2" style="margin-top:9px;">
+            <label class="field"><span class="lab">节点池文件路径</span><input id="proxyPoolFile" placeholder="留空=输出目录/proxy-pool.json" spellcheck="false" /></label>
+            <label class="field"><span class="lab">测活并发线程</span><input id="proxyPoolWorkers" type="number" min="1" max="64" /></label>
+            <label class="field"><span class="lab">本地代理端口池 <em>18001-18422</em></span><input id="proxyLocalPorts" placeholder="如 18001-18422" spellcheck="false" /></label>
+            <div></div>
+          </div>
+          <label class="switch"><input type="checkbox" id="proxyPoolUse" /><span class="track"></span><span class="txt">使用节点池 <em style="color:var(--dim);font-style:normal">每次尝试轮换出口 IP</em></span></label>
+          <div class="row-btns">
+            <button class="btn btn-sm" id="btnFetchSub">拉取订阅</button>
+            <button class="btn btn-sm" id="btnCheckPool">节点测活</button>
+            <button class="btn btn-sm btn-ghost" id="btnPoolStats">刷新状态</button>
+          </div>
+        </section>
+
+        <!-- 高级 -->
+        <section class="card sec-adv">
+          <div class="card-head">
+            <span class="accent-bar"></span><h2>高级</h2>
+            <span class="spacer"></span><span class="sub">一般无需改动</span>
+          </div>
+          <label class="field"><span class="lab">固定密码 <em>留空=随机强密码；填写则全部账号共用（排查 1200058）</em></span><input id="fixedPassword" type="text" placeholder="如 DD890528@?" spellcheck="false" /></label>
+          <div class="grid2" style="margin-top:9px;">
+            <label class="field">
+              <span class="lab">票据模式</span>
+              <select id="ticketMode">
+                <option value="cdp">纯 Go CDP 取票（无 Node）</option>
+                <option value="external">外部票据接口（无浏览器）</option>
+              </select>
+            </label>
+            <label class="field"><span class="lab">外部票据接口 URL</span><input id="externalTicketUrl" placeholder="http://127.0.0.1:9000/ticket" spellcheck="false" /></label>
+            <label class="field"><span class="lab">SIGNATURE_SALT</span><input id="signatureSalt" type="password" /></label>
+            <label class="field"><span class="lab">YY_SUFFIX</span><input id="yySuffix" type="password" /></label>
+            <label class="field"><span class="lab">RECAPTCHA_SITE_KEY</span><input id="recaptchaSiteKey" spellcheck="false" /></label>
+            <label class="field"><span class="lab">Chrome 路径</span><input id="chromePath" spellcheck="false" /></label>
+          </div>
+          <label class="field" style="margin-top:9px;"><span class="lab">输出目录</span><input id="outputDir" spellcheck="false" /></label>
+          <div class="row-btns">
+            <button class="btn btn-sm btn-ghost" id="btnClear">清理历史记录</button>
+          </div>
+        </section>
+
+      </aside>
+
+      <!-- ============ 右：运行态 ============ -->
+      <section class="col-run">
+
+        <div class="hero">
+          <div class="hero-top">
+            <div>
+              <div class="hero-num" id="heroNum">0</div>
+              <div class="hero-cap">已成功注册账号（目标 <span id="heroTarget">0</span>）</div>
+            </div>
+            <div class="stat-grid">
+              <div class="stat"><div class="k">成功率</div><div class="v ok" id="stRate">—</div></div>
+              <div class="stat"><div class="k">失败尝试</div><div class="v err" id="stFail">0</div></div>
+              <div class="stat"><div class="k">并行线路</div><div class="v violet" id="stWorkers">0</div></div>
+              <div class="stat"><div class="k">状态</div><div class="v" id="stRun" style="font-size:14px;">待机</div></div>
+            </div>
+          </div>
+          <div class="progress"><i id="stBar"></i></div>
+          <div class="hero-foot">
+            <span>阶段：<span class="stage-text" id="stStage">未开始</span></span>
+            <span>·</span>
+            <span class="mail-text" id="stEmail">-</span>
+            <span class="spacer" style="flex:1"></span>
+            <span id="stUpdated"></span>
+          </div>
+        </div>
+
+        <div class="console">
+          <div class="console-head">
+            <h3>运行日志</h3>
+            <div class="chips">
+              <button class="chip active" data-filter="all">全部</button>
+              <button class="chip" data-filter="error">错误</button>
+              <button class="chip" data-filter="warn">警告</button>
+              <button class="chip" data-filter="ok">成功</button>
+            </div>
+            <span class="spacer"></span>
+            <span class="hint" id="logCount">0 条</span>
+            <button class="btn btn-sm btn-ghost" id="btnLogClear">清空</button>
+          </div>
+          <div class="console-body" id="logs"></div>
+        </div>
+
+        <div class="panel-tabs">
+          <div class="tabbar">
+            <button class="tab active" data-tab="accounts">已绑定账号 <span class="cnt" id="tabAccCount">0</span></button>
+            <button class="tab" data-tab="mail">收件箱浏览</button>
+            <span class="spacer"></span>
+            <button class="btn btn-sm btn-ghost" id="btnExport">导出 CSV</button>
+          </div>
+          <div class="tabpanes">
+            <div class="tabpane active" id="pane-accounts">
+              <table>
+                <thead>
+                  <tr><th style="width:44px">#</th><th>邮箱</th><th style="width:150px">面板账号</th><th style="width:190px">设备码 / user_code</th><th style="width:90px">时间</th></tr>
+                </thead>
+                <tbody id="resultsBody"></tbody>
+              </table>
+              <div class="hint" id="accEmpty" style="padding:16px;text-align:center;">暂无已绑定账号</div>
+            </div>
+            <div class="tabpane" id="pane-mail">
+              <div class="grid2" style="grid-template-columns: 1fr auto; align-items:end;">
+                <label class="field"><span class="lab">选择号池邮箱</span><input id="mailInboxEmail" list="mailEmailList" placeholder="输入或选择一个邮箱" spellcheck="false" /></label>
+                <button class="btn btn-sm btn-primary" id="btnMailOpen">打开收件箱</button>
+              </div>
+              <datalist id="mailEmailList"></datalist>
+              <div class="hint" id="mailInboxNote" style="margin-top:6px;"></div>
+              <div id="mailInboxList" style="margin-top:8px;"></div>
+              <div id="mailMsgBody"></div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>

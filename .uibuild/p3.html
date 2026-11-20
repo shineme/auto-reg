@@ -1,0 +1,504 @@
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const fields = [
+      "panelBase", "panelKey", "panel2Base", "panel2Key", "mailMode", "count", "workers", "captchaDirect", "mailViaProxy",
+      "signinAfterRegister", "timezoneId",
+      "mailDomain", "mailPrefix", "imapHost", "imapPort", "imapUser", "imapPassword",
+      "hotmailRaw", "hotmailPool", "hotmailPreflightWorkers",
+      "proxyUrl", "proxyRegionRotate", "proxySessTime", "proxyStyle", "proxyState", "proxySticky",
+      "proxySubscriptionUrl", "proxyPoolFile", "proxyPoolUse", "proxyPoolWorkers", "proxyLocalPorts",
+      "fixedPassword", "ticketMode", "externalTicketUrl",
+      "signatureSalt", "yySuffix", "recaptchaSiteKey", "chromePath", "outputDir"
+    ];
+
+    const LOG_LIMIT = 1500;
+    let logBuffer = [];
+    let logFilter = "all";
+    let lastSummary = { results: [] };
+
+    /* ---------------- 通用工具 ---------------- */
+    function esc(s) {
+      return String(s === undefined || s === null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+    function toast(msg, kind) {
+      const el = document.createElement("div");
+      el.className = "toast" + (kind ? " " + kind : "");
+      el.textContent = msg;
+      $("toasts").appendChild(el);
+      setTimeout(() => {
+        el.style.transition = "opacity .3s ease, transform .3s ease";
+        el.style.opacity = "0";
+        el.style.transform = "translateY(6px)";
+        setTimeout(() => el.remove(), 320);
+      }, 3200);
+    }
+    function showBanner(text) {
+      $("bannerText").textContent = text;
+      $("banner").classList.add("show");
+    }
+    function hideBanner() { $("banner").classList.remove("show"); }
+
+    /* ---------------- 日志 ---------------- */
+    function classify(level, msg) {
+      if (level === "error") return "error";
+      if (/\[state\]/.test(msg)) return "state";
+      if (/(失败|超时|拒绝|未通过|被拒|失效|异常|重试|跳过|冷却)/.test(msg)) return "warn";
+      if (/(成功|完成|已绑定|已注册|已保存|签到|领取|导入|测活完成)/.test(msg)) return "ok";
+      return "info";
+    }
+    function appendLog(level, message, time) {
+      let lv = String(level || "info").toLowerCase();
+      let msg = String(message === undefined || message === null ? "" : message);
+      // supervisor 会自带 "[15:04:05] [info] " 前缀，剥掉避免时间戳重复
+      const m = msg.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*\[(\w+)\]\s*(.*)$/);
+      if (m) {
+        time = time || m[1];
+        lv = m[2].toLowerCase();
+        msg = m[3];
+      }
+      const kind = classify(lv, msg);
+      logBuffer.push({ lv: kind, raw: lv, msg, time: time || new Date().toTimeString().slice(0, 8) });
+      if (logBuffer.length > LOG_LIMIT) logBuffer.splice(0, logBuffer.length - LOG_LIMIT);
+      renderLogs();
+    }
+    function renderLogs() {
+      const box = $("logs");
+      const show = logBuffer.filter((l) => {
+        if (logFilter === "all") return true;
+        if (logFilter === "warn") return l.lv === "warn";
+        if (logFilter === "ok") return l.lv === "ok";
+        if (logFilter === "error") return l.lv === "error";
+        return true;
+      });
+      $("logCount").textContent = show.length + " 条";
+      if (show.length === 0) {
+        box.innerHTML = '<div class="log-empty">暂无日志。启动任务后这里会实时输出进度。</div>';
+        return;
+      }
+      const html = show.slice(-600).map((l) =>
+        '<div class="log-line ' + l.lv + '"><span class="t">[' + esc(l.time) + ']</span>' +
+        '<span class="lv">[' + esc(l.raw) + ']</span>' +
+        '<span class="msg">' + esc(l.msg) + '</span></div>'
+      ).join("");
+      box.innerHTML = html;
+      box.scrollTop = box.scrollHeight;
+    }
+    document.querySelectorAll(".chip").forEach((c) => {
+      c.addEventListener("click", () => {
+        document.querySelectorAll(".chip").forEach((x) => x.classList.remove("active"));
+        c.classList.add("active");
+        logFilter = c.dataset.filter;
+        renderLogs();
+      });
+    });
+    $("btnLogClear").addEventListener("click", () => {
+      logBuffer = [];
+      renderLogs();
+    });
+
+    /* ---------------- 配置读写 ---------------- */
+    function readForm() {
+      const cfg = {};
+      for (const f of fields) {
+        const el = $(f);
+        if (!el) continue;
+        if (el.type === "checkbox") cfg[f] = el.checked;
+        else cfg[f] = el.type === "number" ? Number(el.value || 0) : el.value;
+      }
+      return cfg;
+    }
+    function writeForm(cfg) {
+      if (!cfg || typeof cfg !== "object") return;
+      for (const f of fields) {
+        const el = $(f);
+        if (!el || cfg[f] === undefined || cfg[f] === null) continue;
+        if (el.type === "checkbox") el.checked = Boolean(cfg[f]);
+        else el.value = cfg[f];
+      }
+      toggleMailMode();
+      updateTaskHint();
+    }
+    function toggleMailMode() {
+      const isHotmail = $("mailMode").value === "hotmail";
+      $("hotmailBox").classList.toggle("hidden", !isHotmail);
+      $("imapBox").classList.toggle("hidden", isHotmail);
+    }
+    function updateTaskHint() {
+      const c = Number($("count").value || 0);
+      const w = Number($("workers").value || 0);
+      $("taskHint").textContent = "目标 " + c + " · 线路 " + w;
+    }
+    ["count", "workers"].forEach((id) => $(id).addEventListener("input", updateTaskHint));
+
+    /* ---------------- 号池 / 节点池 ---------------- */
+    function renderMailPoolStats(st) {
+      if (!st) return;
+      $("poolStatus").textContent =
+        "号池 总 " + st.total + " · 可用 " + st.available + " · 已用 " + st.used +
+        " · 失效 " + st.skipped + " · 处理中 " + st.reserved;
+    }
+    function renderNodePoolStats(st) {
+      if (!st) return;
+      $("poolStats").textContent =
+        "节点池 共 " + st.total + " · 存活 " + st.alive + " · 失效 " + st.dead +
+        (st.checked ? " · 本次测活 " + st.checked : "");
+    }
+
+    /* ---------------- 进度 / 统计 ---------------- */
+    function renderSummary(s) {
+      if (!s || typeof s !== "object") return;
+      lastSummary = s;
+      const ok = Number(s.succeeded || 0);
+      const target = Number(s.target || 0);
+      const fail = Number(s.failedAttempts || 0);
+      const pct = target > 0 ? Math.min(100, (ok / target) * 100) : 0;
+
+      $("heroNum").textContent = ok.toLocaleString();
+      $("heroTarget").textContent = target.toLocaleString();
+      $("stFail").textContent = fail.toLocaleString();
+      $("stBar").style.width = pct.toFixed(2) + "%";
+      $("stRate").textContent = (ok + fail) > 0 ? ((ok / (ok + fail)) * 100).toFixed(1) + "%" : "—";
+      $("stWorkers").textContent = Number(readForm().workers || 0);
+      $("stStage").textContent = s.currentStage || "待机";
+      $("stEmail").textContent = s.currentEmail || "-";
+      if (s.updatedAt) $("stUpdated").textContent = "更新于 " + String(s.updatedAt).slice(11, 19);
+
+      const running = !!s.running;
+      $("stRun").textContent = running ? "运行中" : "已停止";
+      $("stRun").className = "v " + (running ? "ok" : "");
+      const pill = $("statusPill");
+      pill.classList.toggle("is-running", running);
+      pill.classList.toggle("is-error", !running && fail > 0 && ok === 0);
+      $("statusText").textContent = running ? "运行中" : (ok > 0 ? "已完成 " + ok : "待机");
+
+      $("btnStart").disabled = running;
+      $("btnStop").disabled = !running;
+
+      const tbody = $("resultsBody");
+      tbody.innerHTML = "";
+      const list = Array.isArray(s.results) ? s.results : [];
+      $("tabAccCount").textContent = list.length;
+      $("accEmpty").classList.toggle("hidden", list.length > 0);
+      for (let i = list.length - 1; i >= 0; i--) {
+        const r = list[i];
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td class='mono'>" + (list.length - i) + "</td>" +
+          "<td>" + esc(r.email) + "</td>" +
+          "<td class='badge-ok mono'>" + esc(r.providerName || "") + "</td>" +
+          "<td class='mono' style='color:var(--muted)'>" + esc(r.userCode || r.signInId || "") + "</td>" +
+          "<td class='mono' style='color:var(--dim)'>" + esc(String(r.createdAt || "").slice(11, 19)) + "</td>";
+        tbody.appendChild(tr);
+      }
+    }
+
+    /* ---------------- 收件箱 ---------------- */
+    async function loadMailEmails() {
+      try {
+        const emails = await window.go.main.App.MailListOptions(readForm());
+        const dl = $("mailEmailList");
+        dl.innerHTML = "";
+        for (const e of (emails || [])) {
+          const opt = document.createElement("option");
+          opt.value = e;
+          dl.appendChild(opt);
+        }
+      } catch (err) { /* 静默 */ }
+    }
+    function renderMailInbox(view) {
+      const box = $("mailInboxList");
+      box.innerHTML = "";
+      const items = (view && view.items) || [];
+      if (view && view.error) {
+        box.innerHTML = '<div class="log-line error"><span class="msg">' + esc(view.error) + "</span></div>";
+      }
+      if (items.length === 0 && !(view && view.error)) {
+        box.innerHTML = '<div class="hint" style="padding:12px;text-align:center;">收件箱与垃圾箱都没有邮件</div>';
+        return;
+      }
+      for (const it of items) {
+        const row = document.createElement("div");
+        row.className = "mail-row";
+        const tag = it.folder === "junkemail" ? "垃圾箱" : "收件箱";
+        row.innerHTML =
+          "<div style='min-width:0'><div class='subj'>" + esc(it.subject || "(无主题)") + "</div>" +
+          "<div class='meta'>" + esc(it.from) + " · " + tag + (it.isRead ? "" : " · 未读") + "</div></div>" +
+          "<div class='when'>" + esc(String(it.receivedAt || "").slice(5, 16)) + "</div>";
+        row.addEventListener("click", () => openMailMessage(it));
+        box.appendChild(row);
+      }
+    }
+    async function openMailMessage(it) {
+      const email = $("mailInboxEmail").value;
+      const bodyBox = $("mailMsgBody");
+      bodyBox.innerHTML = '<div class="mail-body hint">正在加载正文 ' + esc(it.id) + " …</div>";
+      try {
+        const msg = await window.go.main.App.MailMessageView(readForm(), email, it.id);
+        let html = msg.bodyHtml || "";
+        if (!html && msg.bodyText) html = "<pre style='white-space:pre-wrap;'>" + esc(msg.bodyText) + "</pre>";
+        bodyBox.innerHTML =
+          "<div class='mail-body'>" +
+          "<div class='mail-subject'>" + esc(msg.subject || "(无主题)") + "</div>" +
+          "<div class='mail-head'>发件人 " + esc(msg.from) + " ｜ 收件人 " + esc(msg.to) +
+          " ｜ " + esc(String(msg.receivedAt || "").slice(5, 16)) + "</div>" +
+          "<div>" + html + "</div></div>";
+      } catch (e) {
+        bodyBox.innerHTML = '<div class="mail-body"><span class="log-error">加载正文失败: ' +
+          esc(e && e.message ? e.message : e) + "</span></div>";
+      }
+    }
+
+    /* ---------------- 初始化 ---------------- */
+    async function loadConfig() {
+      hideBanner();
+      let cfg = null;
+      try {
+        cfg = await window.go.main.App.GetConfig();
+        if (!cfg || typeof cfg !== "object") throw new Error("配置为空");
+        writeForm(cfg);
+      } catch (e) {
+        const msg = e && e.message ? e.message : String(e);
+        showBanner("加载配置失败：" + msg + " —— 已切换到默认值，可手动填写后点击「保存配置」。");
+        appendLog("error", "加载配置失败: " + msg);
+      }
+      try {
+        renderMailPoolStats(await window.go.main.App.GetHotmailStats(cfg || readForm()));
+      } catch (e) {
+        appendLog("error", "读取号池失败: " + (e && e.message ? e.message : e));
+      }
+      try {
+        renderNodePoolStats(await window.go.main.App.GetProxyPoolStats(readForm()));
+      } catch (e) { /* 节点池未初始化时忽略 */ }
+      loadMailEmails();
+    }
+
+    async function refreshProgress() {
+      try {
+        renderSummary(await window.go.main.App.GetProgress());
+      } catch (e) { /* 静默 */ }
+    }
+
+    async function init() {
+      renderLogs();
+      await loadConfig();
+      try {
+        renderSummary(await window.go.main.App.GetProgress());
+      } catch (e) {
+        appendLog("error", "读取进度失败: " + (e && e.message ? e.message : e));
+      }
+      if (window.runtime && window.runtime.EventsOn) {
+        window.runtime.EventsOn("batch:log", (p) => appendLog(p.level, p.message, p.time));
+        window.runtime.EventsOn("batch:progress", (s) => renderSummary(s));
+        window.runtime.EventsOn("hotmail:preflight", (p) => {
+          $("poolStatus").textContent = "测活 " + p.checked + "/" + p.total + "（可用 " + p.available + "，失效 " + p.skipped + "）";
+        });
+      }
+      setInterval(refreshProgress, 3000);
+    }
+
+    /* ---------------- 事件绑定 ---------------- */
+    $("mailMode").addEventListener("change", toggleMailMode);
+    $("bannerClose").addEventListener("click", hideBanner);
+    $("bannerRetry").addEventListener("click", loadConfig);
+
+    document.querySelectorAll(".tab").forEach((t) => {
+      t.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
+        t.classList.add("active");
+        document.querySelectorAll(".tabpane").forEach((p) => p.classList.remove("active"));
+        const pane = $("pane-" + t.dataset.tab);
+        if (pane) pane.classList.add("active");
+        if (t.dataset.tab === "mail") loadMailEmails();
+      });
+    });
+
+    $("btnSave").addEventListener("click", async () => {
+      try {
+        const saved = await window.go.main.App.SaveConfig(readForm());
+        writeForm(saved);
+        appendLog("info", "配置已保存");
+        toast("配置已保存", "ok");
+      } catch (e) { appendLog("error", "保存配置失败: " + e); toast("保存配置失败", "err"); }
+    });
+
+    $("btnTestPanel").addEventListener("click", async () => {
+      try {
+        const msg = await window.go.main.App.TestPanel(readForm());
+        appendLog("info", msg);
+        toast(msg);
+      } catch (e) { appendLog("error", "面板测试失败: " + e); toast("面板测试失败", "err"); }
+    });
+
+    function updateRawCount() {
+      const v = $("hotmailRaw").value || "";
+      const all = v ? v.replace(/\r\n/g, "\n").split("\n").filter((l) => l.trim()) : [];
+      const lines = all.length;
+      const valid = all.filter((l) => {
+        const f = l.split("----");
+        return f.length >= 4 && f[0].includes("@") && f[1].trim() && f[2].trim();
+      }).length;
+      const hint = lines >= 50 && valid < lines * 0.9
+        ? " ⚠ 有效行偏少，可能剪贴不完整，建议用「选择文件并导入」"
+        : "";
+      $("rawCount").textContent = "已粘贴 " + lines + " 行 / 识别有效 " + valid + " 条 / " + v.length + " 字符" + hint;
+      return lines;
+    }
+    $("hotmailRaw").addEventListener("input", updateRawCount);
+    $("hotmailRaw").addEventListener("paste", () => setTimeout(updateRawCount, 0));
+
+    $("btnImport").addEventListener("click", async () => {
+      try {
+        const n = updateRawCount();
+        if (n === 0) { appendLog("error", "号池文本为空，请粘贴内容或选择文件导入"); return; }
+        appendLog("info", "正在导入 " + n + " 行账号文本...");
+        renderMailPoolStats(await window.go.main.App.ImportHotmail(readForm()));
+        toast("号池导入完成", "ok");
+      } catch (e) { appendLog("error", "导入失败: " + e); toast("导入失败", "err"); }
+    });
+
+    $("btnImportFile").addEventListener("click", async () => {
+      const f = $("rawFile").files && $("rawFile").files[0];
+      if (!f) { appendLog("error", "请先选择 .txt 号池文件"); return; }
+      try {
+        appendLog("info", "正在上传 " + f.name + " (" + f.size + " 字节) 到服务器...");
+        const fd = new FormData();
+        fd.append("file", f);
+        const token = (new URLSearchParams(location.search)).get("token") || "";
+        const resp = await fetch("/api/upload" + (token ? "?token=" + encodeURIComponent(token) : ""), { method: "POST", body: fd });
+        const up = await resp.json();
+        if (up.error) throw new Error(up.error);
+        appendLog("info", "上传完成：" + up.lines + " 行，已存入 " + up.path + "，开始导入...");
+        renderMailPoolStats(await window.go.main.App.ImportHotmailFile(readForm(), up.path));
+        toast("文件导入完成", "ok");
+      } catch (e) { appendLog("error", "文件导入失败: " + e); toast("文件导入失败", "err"); }
+    });
+
+    $("btnPreflight").addEventListener("click", async () => {
+      try {
+        appendLog("info", "开始多线程测活...");
+        renderMailPoolStats(await window.go.main.App.PreflightHotmail(readForm()));
+        toast("测活完成", "ok");
+      } catch (e) { appendLog("error", "测活失败: " + e); toast("测活失败", "err"); }
+    });
+
+    $("btnRemoveSkipped").addEventListener("click", async () => {
+      try {
+        renderMailPoolStats(await window.go.main.App.RemoveSkippedHotmail(readForm()));
+        appendLog("info", "已移除失效账号");
+        toast("已移除失效账号", "ok");
+      } catch (e) { appendLog("error", String(e)); }
+    });
+
+    $("btnFetchSub").addEventListener("click", async () => {
+      try {
+        appendLog("info", "正在拉取订阅...");
+        const st = await window.go.main.App.ImportProxySubscription(readForm());
+        renderNodePoolStats(st);
+        appendLog("info", "订阅拉取完成：" + st.total + " 个节点");
+        toast("订阅拉取完成：" + st.total + " 个节点", "ok");
+      } catch (e) { appendLog("error", "拉取订阅失败: " + e); toast("拉取订阅失败", "err"); }
+    });
+    $("btnCheckPool").addEventListener("click", async () => {
+      try {
+        appendLog("info", "正在测活节点...");
+        const st = await window.go.main.App.CheckProxyPool(readForm());
+        renderNodePoolStats(st);
+        appendLog("info", "测活完成：存活 " + st.alive + " / " + st.total);
+        toast("节点测活完成，存活 " + st.alive, "ok");
+      } catch (e) { appendLog("error", "节点测活失败: " + e); toast("节点测活失败", "err"); }
+    });
+    $("btnPoolStats").addEventListener("click", async () => {
+      try {
+        renderNodePoolStats(await window.go.main.App.GetProxyPoolStats(readForm()));
+      } catch (e) { appendLog("error", "读取节点池失败: " + e); }
+    });
+
+    $("btnCheckinAll").addEventListener("click", async () => {
+      try {
+        appendLog("info", "开始批量补签...");
+        const msg = await window.go.main.App.CheckinAll(readForm());
+        appendLog("info", msg);
+        toast(msg);
+      } catch (e) { appendLog("error", "批量补签失败: " + (e && e.message ? e.message : e)); toast("批量补签失败", "err"); }
+    });
+    $("btnMailScan").addEventListener("click", async () => {
+      try {
+        appendLog("info", "开始批量收信扫描...");
+        const msg = await window.go.main.App.MailScanAll(readForm());
+        appendLog("info", msg);
+        toast(msg);
+        loadMailEmails();
+      } catch (e) { appendLog("error", "批量收信失败: " + (e && e.message ? e.message : e)); toast("批量收信失败", "err"); }
+    });
+
+    $("btnMailOpen").addEventListener("click", async () => {
+      const email = $("mailInboxEmail").value.trim();
+      if (!email) { $("mailInboxNote").textContent = "请先在上方选一个邮箱"; return; }
+      $("mailInboxNote").textContent = "加载中…";
+      $("mailInboxList").innerHTML = "";
+      $("mailMsgBody").innerHTML = "";
+      try {
+        const view = await window.go.main.App.MailInboxView(readForm(), email);
+        renderMailInbox(view);
+        const n = ((view && view.items) || []).length;
+        $("mailInboxNote").textContent = n > 0 ? "共 " + n + " 封（含垃圾箱）" : "（空）";
+      } catch (e) {
+        $("mailInboxNote").textContent = "加载失败";
+        $("mailInboxList").innerHTML = '<div class="log-line error"><span class="msg">' + esc(e && e.message ? e.message : e) + "</span></div>";
+      }
+    });
+
+    $("btnStart").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.StartBatch(readForm());
+        appendLog("info", "已启动纯 Go 协议批量注册");
+        toast("已启动注册任务", "ok");
+      } catch (e) { appendLog("error", "启动失败: " + e); toast("启动失败", "err"); }
+    });
+    $("btnStop").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.StopBatch();
+        appendLog("info", "已发送停止信号");
+      } catch (e) { appendLog("error", String(e)); }
+    });
+    $("btnSupStart").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.StartSupervised(readForm());
+        appendLog("info", "已启动监督批量（异常自动重启续跑，直到达标/号池耗尽/点停止）");
+        toast("监督批量已启动", "ok");
+      } catch (e) { appendLog("error", "监督批量启动失败: " + e); toast("监督批量启动失败", "err"); }
+    });
+    $("btnSupStop").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.StopSupervised();
+        appendLog("info", "已停止监督批量");
+      } catch (e) { appendLog("error", "停止监督失败: " + e); }
+    });
+    $("btnClear").addEventListener("click", async () => {
+      try {
+        await window.go.main.App.ClearHistory(readForm());
+        renderSummary({ succeeded: 0, target: Number($("count").value || 0), failedAttempts: 0, running: false, results: [] });
+        appendLog("info", "已清理历史记录");
+        toast("已清理历史记录", "ok");
+      } catch (e) { appendLog("error", String(e)); }
+    });
+
+    $("btnExport").addEventListener("click", () => {
+      const list = (lastSummary && Array.isArray(lastSummary.results)) ? lastSummary.results : [];
+      if (list.length === 0) { toast("暂无账号可导出", "err"); return; }
+      const head = ["邮箱", "面板账号", "设备码", "user_code", "signInId", "签到", "时间"];
+      const rows = list.map((r) => [r.email, r.providerName, r.signInId, r.userCode, r.signInId, r.signin, r.createdAt]);
+      const csv = [head].concat(rows).map((r) => r.map((c) => '"' + String(c === undefined || c === null ? "" : c).replace(/"/g, '""') + '"').join(",")).join("\r\n");
+      const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "minimax-accounts-" + new Date().toISOString().slice(0, 10) + ".csv";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toast("已导出 " + list.length + " 条账号", "ok");
+    });
+
+    window.addEventListener("DOMContentLoaded", init);
+  </script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+复制
+在本页
+- Proxies
+- Proxy Configuration Parameters
+## Proxy Locations 711Proxy offers a wide range of location options, including targeting by region, country, state, and city. Location targeting is an important aspect of proxy configuration. Users often require proxies from specific locations to unblock content or access localized services.
+We use the ipinfo.io database to assign location values to our egress nodes. Some other public IP databases may show different locations. If location discrepancy cannot be tolerated, please carefully verify whether the assigned proxy location matches the location on the IP database that the targeted website is using.
+Please refer to the examples below for further illustration.
+## Country/region region - is a key configuration for region and can be used to specify which country&#x27;s IPs will be used to handle the requests. The parameter value is the 2-letter (all uppercase) country code, e.g., US for the United States, GB for the United Kingdom, BR for Brazil, JP for Japan, IN for India. Here are some examples of region parameter options:
+region-US
+region-GB
+region-BR
+region-JP
+region-IN
+## State Once a country is specified, the state field becomes available. To fetch proxies from a specific state or province, append the st flag to the proxy string. For example, st-Florida, st-California. Here are some examples of combined country and state parameter options:
+region-US-st-California
+region-CA-st-Quebec
+region-BR-st-Saopaulo
+region-JP-st-Tokyo
+region-AU-st-Newsouthwales
+## City Append the city- parameter to narrow down to city-level targeting. For example, region-US-st-Florida-city-Miami means that proxies from Miami, Florida, USA will handle the query. Here are some examples of combined country and state and city parameter options:
+region-US-st-Florida-city-Miami
+region-CA-st-Quebec-city-Montreal
+region-BR-st-Saopaulo-city-Saopaulo
+region-JP-st-Tokyo-city-Tokyo
+region-AU-st-Newsouthwales-city-Sydney
+We support most cities in the world, however, as residential proxies are the devices of real users, their availability can be affected by various factors. Availability tends to be better in most popular cities.
+上一页 IP Whitelist
+下一页 Session Types
+这有帮助吗？

@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,7 +31,25 @@ func NewApp() *App {
 			a.emitBatchLog(level, msg)
 		},
 		func(s BatchSummary) {
-			emitEvent("batch:progress", s)
+			points := 0
+			for _, r := range s.Results {
+				if v, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(r.Signin), "+")); err == nil && v > 0 {
+					points += v
+				}
+			}
+			emitEvent("batch:progress", ProgressLite{
+				Target:         s.Target,
+				Succeeded:      s.Succeeded,
+				FailedAttempts: s.FailedAttempts,
+				CurrentStage:   s.CurrentStage,
+				CurrentEmail:   s.CurrentEmail,
+				Running:        s.Running,
+				UpdatedAt:      s.UpdatedAt,
+				Points:         points,
+			})
+		},
+		func(e StepEvent) {
+			emitEvent("batch:step", e)
 		},
 	)
 	return a
@@ -188,6 +208,53 @@ func (a *App) SaveConfig(cfg Config) (Config, error) {
 
 func (a *App) GetProgress() BatchSummary {
 	return a.runner.Summary()
+}
+
+// ProgressLite 是轻量进度快照：不含 results 列表，避免上千行结果随每次事件推送到前端。
+type ProgressLite struct {
+	Target         int    `json:"target"`
+	Succeeded      int    `json:"succeeded"`
+	FailedAttempts int    `json:"failedAttempts"`
+	CurrentStage   string `json:"currentStage"`
+	CurrentEmail   string `json:"currentEmail"`
+	Running        bool   `json:"running"`
+	UpdatedAt      string `json:"updatedAt"`
+	Points         int    `json:"points"`
+	FirstAt        string `json:"firstAt"`
+	LastAt         string `json:"lastAt"`
+}
+
+// GetProgressLite 返回轻量进度快照。
+func (a *App) GetProgressLite() ProgressLite {
+	s := a.runner.Summary()
+	points := 0
+	firstAt, lastAt := "", ""
+	for _, r := range s.Results {
+		if v, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(r.Signin), "+")); err == nil && v > 0 {
+			points += v
+		}
+		if r.CreatedAt == "" {
+			continue
+		}
+		if firstAt == "" || r.CreatedAt < firstAt {
+			firstAt = r.CreatedAt
+		}
+		if lastAt == "" || r.CreatedAt > lastAt {
+			lastAt = r.CreatedAt
+		}
+	}
+	return ProgressLite{
+		Target:         s.Target,
+		Succeeded:      s.Succeeded,
+		FailedAttempts: s.FailedAttempts,
+		CurrentStage:   s.CurrentStage,
+		CurrentEmail:   s.CurrentEmail,
+		Running:        s.Running,
+		UpdatedAt:      s.UpdatedAt,
+		Points:         points,
+		FirstAt:        firstAt,
+		LastAt:         lastAt,
+	}
 }
 
 func (a *App) TestPanel(cfg Config) (string, error) {
@@ -469,6 +536,117 @@ func (a *App) MailListOptions(cfg Config) ([]string, error) {
 	cfg.applyDefaults()
 	all, _, err := MailScanEmails(cfg.HotmailPool)
 	return all, err
+}
+
+// MailboxOption 是号池邮箱的检索结果，带状态供前端做分类与快速选择。
+type MailboxOption struct {
+	Email  string `json:"email"`
+	Status string `json:"status"`
+	Note   string `json:"note"`
+}
+
+// SearchMailboxes 在号池中按关键字检索邮箱（大小写不敏感，支持前缀/子串匹配）。
+// 返回结果按"前缀命中 > 子串命中"排序，便于前端做快速选择。
+func (a *App) SearchMailboxes(cfg Config, query string, limit int) ([]MailboxOption, error) {
+	cfg.applyDefaults()
+	if limit <= 0 {
+		limit = 50
+	}
+	pool, err := LoadHotmailPool(cfg.HotmailPool)
+	if err != nil {
+		return nil, err
+	}
+	q := strings.ToLower(strings.TrimSpace(query))
+	out := make([]MailboxOption, 0, limit)
+	for _, acc := range pool.Accounts {
+		if acc.Email == "" {
+			continue
+		}
+		note := acc.LastError
+		if q != "" {
+			lower := strings.ToLower(acc.Email)
+			if !strings.HasPrefix(lower, q) && !strings.Contains(lower, q) {
+				continue
+			}
+	}
+		out = append(out, MailboxOption{Email: acc.Email, Status: acc.Status, Note: note})
+	if len(out) >= limit {
+			break
+		}
+	}
+	// 前缀命中排前面
+	if q != "" {
+		sort.SliceStable(out, func(i, j int) bool {
+			return strings.HasPrefix(strings.ToLower(out[i].Email), q) && !strings.HasPrefix(strings.ToLower(out[j].Email), q)
+		})
+	}
+	return out, nil
+}
+
+// ResultsPage 是已绑定账号的分页结果。
+type ResultsPage struct {
+	Total  int             `json:"total"`
+	Offset int             `json:"offset"`
+	Limit  int             `json:"limit"`
+	Rows   []AccountResult `json:"rows"`
+}
+
+// GetResultsPage 从 summary.json 读取已绑定账号，支持关键字过滤与排序后分页，
+// 避免前端一次渲染上千行。
+func (a *App) GetResultsPage(cfg Config, offset, limit int, query, sortBy string) (ResultsPage, error) {
+	cfg.applyDefaults()
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	raw, err := os.ReadFile(filepath.Join(cfg.OutputDir, "summary.json"))
+	if err != nil {
+	return ResultsPage{Rows: []AccountResult{}}, nil
+	}
+	var sum BatchSummary
+	if err := json.Unmarshal(raw, &sum); err != nil {
+	return ResultsPage{Rows: []AccountResult{}}, nil
+	}
+	rows := sum.Results
+	if rows == nil {
+		rows = []AccountResult{}
+	}
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q != "" {
+		filtered := make([]AccountResult, 0, len(rows))
+		for _, r := range rows {
+			hay := strings.ToLower(r.Email + " " + r.ProviderName + " " + r.UserCode)
+			if strings.Contains(hay, q) {
+				filtered = append(filtered, r)
+			}
+		}
+		rows = filtered
+	}
+	switch sortBy {
+	case "email":
+		sort.SliceStable(rows, func(i, j int) bool { return rows[i].Email < rows[j].Email })
+	case "-email":
+		sort.SliceStable(rows, func(i, j int) bool { return rows[i].Email > rows[j].Email })
+	case "provider":
+		sort.SliceStable(rows, func(i, j int) bool { return rows[i].ProviderName < rows[j].ProviderName })
+	case "-provider":
+		sort.SliceStable(rows, func(i, j int) bool { return rows[i].ProviderName > rows[j].ProviderName })
+	case "-time": // time asc
+		sort.SliceStable(rows, func(i, j int) bool { return rows[i].CreatedAt < rows[j].CreatedAt })
+	default: // time desc
+		sort.SliceStable(rows, func(i, j int) bool { return rows[i].CreatedAt > rows[j].CreatedAt })
+	}
+	total := len(rows)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total {
+	return ResultsPage{Total: total, Offset: offset, Limit: limit, Rows: []AccountResult{}}, nil
+	}
+	end := offset + limit
+	if end > total {
+	end = total
+	}
+	return ResultsPage{Total: total, Offset: offset, Limit: limit, Rows: rows[offset:end]}, nil
 }
 
 func (a *App) ClearHistory(cfg Config) error {

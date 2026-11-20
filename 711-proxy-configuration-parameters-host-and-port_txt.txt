@@ -1,0 +1,34 @@
+复制
+在本页
+- Proxies
+- Proxy Configuration Parameters
+## Host and Port The proxy host and port are two required values in the proxy string used to configure your application or device to connect to the internet via the proxy server.
+The proxy host options that we currently provide are as follows, global.711proxy.com is the default option, you may also choose the closest server based on your network IP address to ensure optimal connection:
+Proxy Host
+Region
+global.(xxx).711proxy.com
+Global
+as.(xxx).711proxy.com
+Asia
+us.(xxx).711proxy.com
+North America
+eu.(xxx).711proxy.com
+Europe
+ina.(xxx).711proxy.com
+Southeast Asia
+Different proxy products are assigned with different port numbers, you may match your billing plan by modifying the port number, please make sure you use a port number that matches the type of proxy product that you would like to use:
+Port Number
+Proxy Product
+10000
+Residential Proxies - GB
+20000
+Residential Proxies - IP
+12000
+Unlimited Proxies
+22000
+SOCKS5 Proxies
+30000
+Static Residential Proxies
+上一页 Session Types
+下一页 Proxy String
+这有帮助吗？

@@ -5,6 +5,7 @@ import path from "node:path";
 const workspace = process.cwd();
 const protocolClient = path.join(workspace, "scripts", "minimax-protocol-client.mjs");
 const imapClient = path.join(workspace, "scripts", "imap.mjs");
+const hotmailClient = path.join(workspace, "scripts", "hotmail-graph.mjs");
 const runConfigPath = process.env.RUN_CONFIG_PATH || path.join(workspace, "artifacts", "run-config.json");
 const statePath = process.env.STATE_PATH || path.join(workspace, "artifacts", "minimax-session.json");
 const flowPath = process.env.FLOW_PATH || path.join(workspace, "artifacts", "minimax-flow.json");
@@ -12,6 +13,8 @@ const userCode = process.env.USER_CODE;
 const email = process.env.EMAIL;
 const password = process.env.PASSWORD;
 let captchaTicket = process.env.CAPTCHA_TICKET;
+const mailMode = String(process.env.MAIL_MODE || "imap").toLowerCase();
+const useHotmail = mailMode === "hotmail" || mailMode === "hotmail-graph";
 const imapUser = process.env.IMAP_USER;
 const imapPassword = process.env.IMAP_PASSWORD;
 const pollIntervalMs = Number(process.env.POLL_INTERVAL_MS || 4000);
@@ -20,7 +23,14 @@ const runConfig = JSON.parse((await fs.readFile(runConfigPath, "utf8").catch(() 
 const effectivePassword = password || runConfig.password;
 captchaTicket = captchaTicket || runConfig.captchaTicket || JSON.parse(await fs.readFile(statePath, "utf8").catch(() => "{}")).captcha?.ticket || "";
 
-for (const [name, value] of Object.entries({ USER_CODE: userCode, EMAIL: email, PASSWORD: effectivePassword, IMAP_USER: imapUser, IMAP_PASSWORD: imapPassword })) {
+const requiredEnv = { USER_CODE: userCode, EMAIL: email, PASSWORD: effectivePassword };
+if (!useHotmail) {
+  requiredEnv.IMAP_USER = imapUser;
+  requiredEnv.IMAP_PASSWORD = imapPassword;
+} else if (!process.env.HOTMAIL_ACCOUNT_PATH && !process.env.HOTMAIL_ACCOUNT_JSON && !process.env.HOTMAIL_REFRESH_TOKEN) {
+  throw new Error("HOTMAIL_ACCOUNT_PATH is required when MAIL_MODE=hotmail");
+}
+for (const [name, value] of Object.entries(requiredEnv)) {
   if (!value) throw new Error(`${name} is required`);
 }
 
@@ -98,8 +108,10 @@ async function saveFlow(status, error) {
 
 function runWithProgress(script, env, timeoutMs, command) {
   const step = command || (path.basename(script) === "imap.mjs" ? "poll-mail" : "protocol");
+  const normalizedStep = path.basename(script) === "hotmail-graph.mjs" ? "poll-mail" : step;
   emitFlowProgress(step);
-  return run(script, env, timeoutMs, command);
+  if (normalizedStep !== step) emitFlowProgress(normalizedStep);
+  return run(script, env, timeoutMs, command || (path.basename(script) === "hotmail-graph.mjs" ? "poll-code" : ""));
 }
 
 function delay(ms) {
@@ -120,9 +132,11 @@ try {
       const deadline = Date.now() + pollTimeoutMs;
       let code = null;
       while (Date.now() < deadline) {
-        const mail = await runWithProgress(imapClient, { ...baseEnv, MAIL_SINCE_SECONDS: "600" }, 30000);
+        const mail = useHotmail
+          ? await runWithProgress(hotmailClient, { ...baseEnv, MAIL_SINCE_SECONDS: "600", HOTMAIL_COMMAND: "poll-code" }, 30000, "poll-code")
+          : await runWithProgress(imapClient, { ...baseEnv, MAIL_SINCE_SECONDS: "600" }, 30000);
         record("poll-mail", mail);
-        code = mail.json.code;
+        code = mail.json?.code || null;
         if (code) break;
         await delay(pollIntervalMs);
       }

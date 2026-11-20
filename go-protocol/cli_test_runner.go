@@ -205,6 +205,7 @@ func runCLITestOne() {
 			fmt.Printf("[%s] [%s] %s\n", time.Now().Format("15:04:05"), level, msg)
 		},
 		nil,
+		nil,
 	)
 	if err := runner.Start(cfg); err != nil {
 		log.Fatalf("启动失败: %v", err)
@@ -239,6 +240,7 @@ func runCLIBatch(count int, workers int) {
 		func(s BatchSummary) {
 			fmt.Printf("[%s] [state] 成功 %d/%d，失败 %d，阶段：%s\n", time.Now().Format("15:04:05"), s.Succeeded, s.Target, s.FailedAttempts, s.CurrentStage)
 		},
+		nil,
 	)
 	if err := runner.Start(cfg); err != nil {
 		log.Fatalf("启动失败: %v", err)

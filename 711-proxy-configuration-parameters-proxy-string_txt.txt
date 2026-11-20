@@ -1,0 +1,12 @@
+复制
+在本页
+- Proxies
+- Proxy Configuration Parameters
+## Proxy String In proxy configuration with username and password authentication, the "Get Proxy List" module is the final and essential step in configuring your proxies. The module presents your proxies in a ready-to-use format and provides all the necessary and detailed information for each proxy connection. You can conveniently choose to "Copy" the list to your clipboard or "Export" it for offline use. You can also select the format that best suits your needs and specify the number of proxies that you wish to see or export. This streamlined approach ensures quick and easy access to your proxy information, empowering you to use your proxies right away.
+A proxy string consists of 4 elements: host, port, username, and password, and we adopt hostname:port:username:password as the default format, you may also choose other combinations of the format.
+711Proxy utilizes the "username" part of the string to configure specific parameters. For example, a proxy string for Florida, the US:
+image.png
+You can apply these proxy strings to any software application or tool to start using your proxies right away. You may check out the quick guides for integrations with various tools in the Integrations section.
+上一页 Host and Port
+下一页 API URL
+这有帮助吗？
