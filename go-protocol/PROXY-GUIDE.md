@@ -39,6 +39,10 @@ socks5://5v8rrjwzio51283-region-Rand-sid-nKYCezDN-t-10:jjxqd63c@us-eu.zooproxy.c
 3. 想要多国轮换：GUI「代理区域轮换」填 `US,JP,GB`，程序会按线路顺序轮换国家。
 4. 想要每请求换 IP（Rotating）：取消勾选「启用 Sticky 会话」，此时不带任何 sid/t- 参数。
 
+ZooProxy 官方能力（动态住宅）：支持 SOCKS5 / HTTP / HTTPS 入口，可按国家 / 州 / 城市定位，
+粘性会话最长 120 分钟，也支持按请求轮换。官方说明：https://zooproxy.com/zh/traffic-subject/
+本工具用到的三个参数与官方一致：`region-`（国家）、`sid-`（会话/粘性）、`t-`（粘性分钟数，1-120）。
+
 注意：sid 写死 + 长 t- 值 = 长时间用同一个 IP。MiniMax/Cursor 这类风控会很快记住这个出口 IP，
 表现就是「票据拿到了但被判 1200063 人机验证未通过」或「验证码邮件发不出来」。
 遇到这种情况优先打开「每次尝试强制换新会话」，并把 t- 调小（5-15 分钟）。

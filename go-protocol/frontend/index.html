@@ -334,6 +334,20 @@
           </div>
           <label class="switch"><input type="checkbox" id="proxySticky" /><span class="track"></span><span class="sw-text">启用 Sticky 会话<em>关闭=每请求换 IP</em></span></label>
           <label class="switch"><input type="checkbox" id="proxyRotateSession" /><span class="track"></span><span class="sw-text">每次尝试强制换新会话<em>忽略地址里写死的 sid，换新出口 IP</em></span></label>
+          <details class="sub-hint">
+            <summary>代理参数速查（ZooProxy / Cliproxy / 711）</summary>
+            <div class="sub-hint-body">
+              <p><b>ZooProxy</b>：<code>socks5://账号-region-Rand-sid-xxxxxxxx-t-10:密码@us-eu.zooproxy.com:5000</code></p>
+              <ul>
+                <li><code>region-XX</code> = 出口国家，<code>Rand</code> 随机国家；GUI「代理区域轮换」填 <code>US,JP,GB</code> 可按线路依次换国家</li>
+                <li><code>sid-xxxxxxxx</code> = 会话 ID，<b>相同 sid = 相同粘性 IP</b>，换 sid = 换 IP</li>
+                <li><code>t-10</code> = 粘性时长（分钟），改 <code>t-</code> 后面的数字即可延长/缩短</li>
+                <li>想每次注册都换 IP：勾选「每次尝试强制换新会话」，程序会自动重写 sid</li>
+                <li>想每请求换 IP（Rotating）：取消「启用 Sticky 会话」，地址里也不要留 sid</li>
+              </ul>
+              <p><b>Cliproxy</b>：<code>sid-</code> + <code>t-</code> + <code>st-州省</code>；<b>711</b>：<code>session-</code> + <code>sessTime-</code>。完整说明见 <code>PROXY-GUIDE.md</code></p>
+            </div>
+          </details>
           <div class="field" style="margin-top:8px;"><label for="proxySubscriptionUrl">订阅地址 <em>可多行，每行一个（Clash YAML / base64 链接列表）</em></label><textarea id="proxySubscriptionUrl" rows="3" placeholder="https://…/sub?token=…&#10;https://…/another-sub?token=…" spellcheck="false"></textarea></div>
           <div class="grid2">
             <div class="field"><label for="proxyPoolFile">节点池文件路径</label><input id="proxyPoolFile" placeholder="留空=输出目录/proxy-pool.json" spellcheck="false" /></div>

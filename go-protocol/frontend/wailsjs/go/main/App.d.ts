@@ -10,7 +10,11 @@ export function ClearHistory(arg1:main.Config):Promise<void>;
 
 export function GetConfig():Promise<main.Config>;
 
+export function GetCursorProgress():Promise<main.CursorProgress>;
+
 export function GetHotmailStats(arg1:main.Config):Promise<main.HotmailPoolStats>;
+
+export function GetPlatformStatus(arg1:main.Config):Promise<main.PlatformStatus>;
 
 export function GetProgress():Promise<main.BatchSummary>;
 

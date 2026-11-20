@@ -88,12 +88,14 @@ export namespace main {
 	    hotmailPool: string;
 	    hotmailPreflightWorkers: number;
 	    proxyUrl: string;
+	    cursorProxy?: string;
 	    proxyDirectHosts: string[];
 	    proxyRegionRotate: string;
 	    proxySessTime: number;
 	    proxyStyle: string;
 	    proxyState: string;
 	    proxySticky?: boolean;
+	    proxyRotateSession?: boolean;
 	    proxySubscriptionUrl: string;
 	    proxyPoolFile: string;
 	    proxyPoolUse: boolean;
@@ -104,6 +106,8 @@ export namespace main {
 	    externalTicketUrl: string;
 	    count: number;
 	    workers: number;
+	    platformMode: string;
+	    cursorCount: number;
 	    captchaDirect: boolean;
 	    mailViaProxy: boolean;
 	    signinAfterRegister: boolean;
@@ -136,12 +140,14 @@ export namespace main {
 	        this.hotmailPool = source["hotmailPool"];
 	        this.hotmailPreflightWorkers = source["hotmailPreflightWorkers"];
 	        this.proxyUrl = source["proxyUrl"];
+	        this.cursorProxy = source["cursorProxy"];
 	        this.proxyDirectHosts = source["proxyDirectHosts"];
 	        this.proxyRegionRotate = source["proxyRegionRotate"];
 	        this.proxySessTime = source["proxySessTime"];
 	        this.proxyStyle = source["proxyStyle"];
 	        this.proxyState = source["proxyState"];
 	        this.proxySticky = source["proxySticky"];
+	        this.proxyRotateSession = source["proxyRotateSession"];
 	        this.proxySubscriptionUrl = source["proxySubscriptionUrl"];
 	        this.proxyPoolFile = source["proxyPoolFile"];
 	        this.proxyPoolUse = source["proxyPoolUse"];
@@ -152,6 +158,8 @@ export namespace main {
 	        this.externalTicketUrl = source["externalTicketUrl"];
 	        this.count = source["count"];
 	        this.workers = source["workers"];
+	        this.platformMode = source["platformMode"];
+	        this.cursorCount = source["cursorCount"];
 	        this.captchaDirect = source["captchaDirect"];
 	        this.mailViaProxy = source["mailViaProxy"];
 	        this.signinAfterRegister = source["signinAfterRegister"];
@@ -162,6 +170,30 @@ export namespace main {
 	        this.yySuffix = source["yySuffix"];
 	        this.recaptchaSiteKey = source["recaptchaSiteKey"];
 	        this.fixedPassword = source["fixedPassword"];
+	    }
+	}
+	export class CursorProgress {
+	    target: number;
+	    succeeded: number;
+	    failed: number;
+	    currentEmail: string;
+	    running: boolean;
+	    updatedAt: string;
+	    lastPanelUser: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CursorProgress(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.target = source["target"];
+	        this.succeeded = source["succeeded"];
+	        this.failed = source["failed"];
+	        this.currentEmail = source["currentEmail"];
+	        this.running = source["running"];
+	        this.updatedAt = source["updatedAt"];
+	        this.lastPanelUser = source["lastPanelUser"];
 	    }
 	}
 	export class HotmailPoolStats {
@@ -303,6 +335,50 @@ export namespace main {
 	        this.status = source["status"];
 	        this.note = source["note"];
 	    }
+	}
+	export class PlatformStatus {
+	    mode: string;
+	    modeLabel: string;
+	    miniMax: boolean;
+	    cursor: boolean;
+	    miniMaxRunning: boolean;
+	    supervised: boolean;
+	    cursorRunning: boolean;
+	    cursorProgress: CursorProgress;
+	
+	    static createFrom(source: any = {}) {
+	        return new PlatformStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.modeLabel = source["modeLabel"];
+	        this.miniMax = source["miniMax"];
+	        this.cursor = source["cursor"];
+	        this.miniMaxRunning = source["miniMaxRunning"];
+	        this.supervised = source["supervised"];
+	        this.cursorRunning = source["cursorRunning"];
+	        this.cursorProgress = this.convertValues(source["cursorProgress"], CursorProgress);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ProgressLite {
 	    target: number;

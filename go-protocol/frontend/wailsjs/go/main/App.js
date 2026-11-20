@@ -18,8 +18,16 @@ export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
 
+export function GetCursorProgress() {
+  return window['go']['main']['App']['GetCursorProgress']();
+}
+
 export function GetHotmailStats(arg1) {
   return window['go']['main']['App']['GetHotmailStats'](arg1);
+}
+
+export function GetPlatformStatus(arg1) {
+  return window['go']['main']['App']['GetPlatformStatus'](arg1);
 }
 
 export function GetProgress() {
